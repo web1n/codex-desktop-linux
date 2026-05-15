@@ -34,13 +34,6 @@ Known risks:
   material is file-backed and protected by ordinary user file permissions.
 - OpenAI may still reject Linux host enrollment server-side. This feature only
   removes local macOS-only blockers in the repackaged app.
-- Mobile projectless chats currently start from a generated local Desktop
-  directory such as `~/Documents/Codex/<date>-<prompt>`. SSH execution
-  environments from `~/.codex/environments.toml` can be selected, but they
-  inherit that local cwd. If the remote host does not have the same path, the
-  remote exec-server rejects shell startup and Codex falls back to the local
-  environment. This feature does not yet bridge Desktop SSH project state
-  (`remote-projects`) into the mobile remote-control thread cwd.
 - Treat this as experimental account-level remote-control plumbing.
 
 Run the feature tests with:
