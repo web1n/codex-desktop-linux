@@ -117,6 +117,52 @@ webview_port_is_open_at__new() {
     webview_port_is_open__new
 }
 
+with_home() {
+    local home="$1"
+    shift
+    local old_home="${HOME-}"
+    local had_home=0
+    [ "${HOME+x}" = x ] && had_home=1
+
+    HOME="$home"
+    "$@"
+    local rc=$?
+
+    if [ "$had_home" = 1 ]; then
+        HOME="$old_home"
+    else
+        unset HOME
+    fi
+    return "$rc"
+}
+
+find_closed_tcp_port() {
+    local candidate attempt
+    for attempt in $(seq 1 50); do
+        candidate=$(
+            python3 - <<'PY'
+import socket
+
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    print(s.getsockname()[1])
+PY
+        ) || return 1
+        if ! python3 - "$candidate" <<'PY' 2>/dev/null; then
+import socket
+import sys
+
+with socket.socket() as s:
+    s.settimeout(0.05)
+    s.connect(("127.0.0.1", int(sys.argv[1])))
+PY
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # ─── Fixture server ────────────────────────────────────────────────────────
 setup_server() {
     FIXTURES=$(mktemp -d) || fail "mktemp -d failed"
@@ -142,7 +188,7 @@ EOF
 EOF
 
     PORT_OPEN=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));p=s.getsockname()[1];s.close();print(p)')
-    PORT_CLOSED=$((PORT_OPEN + 1))
+    PORT_CLOSED=$(find_closed_tcp_port) || fail "could not find an unused closed localhost port"
 
     # exec into python so $! is the python PID directly (not the subshell's),
     # making teardown reliable and avoiding orphan http.server processes.
@@ -154,7 +200,7 @@ EOF
     # depends on the server returning a real response.
     local i
     for i in $(seq 1 40); do
-        curl --silent --fail --max-time 0.2 "http://127.0.0.1:$PORT_OPEN/index.html" >/dev/null 2>&1 && return 0
+        curl --disable --silent --fail --max-time 0.2 "http://127.0.0.1:$PORT_OPEN/index.html" >/dev/null 2>&1 && return 0
         sleep 0.05
     done
     return 1
@@ -164,6 +210,7 @@ teardown() {
     [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null
     [ -n "${SERVER_PID:-}" ] && wait "$SERVER_PID" 2>/dev/null
     [ -n "${FIXTURES:-}"   ] && rm -rf "$FIXTURES"
+    [ -n "${CURLRC_HOME:-}" ] && rm -rf "$CURLRC_HOME"
 }
 trap teardown EXIT
 
@@ -206,6 +253,9 @@ main() {
     info "HTTP origin verify — markers + failure modes"
     assert_rc "orig  ok markers"             0 verify_webview_origin__orig "$URL_OK"
     assert_rc "new   ok markers"             0 verify_webview_origin__new  "$URL_OK"
+    CURLRC_HOME=$(mktemp -d) || fail "mktemp -d failed for curlrc fixture"
+    printf '%s\n' 'output = "curlrc-out"' > "$CURLRC_HOME/.curlrc"
+    assert_rc "new   ok markers ignores .curlrc" 0 with_home "$CURLRC_HOME" verify_webview_origin__new "$URL_OK"
     assert_rc "orig  404 path"               1 verify_webview_origin__orig "$URL_404"
     assert_rc "new   404 path"               1 verify_webview_origin__new  "$URL_404"
     assert_rc "orig  wrong title"            1 verify_webview_origin__orig "$URL_BADTITLE"

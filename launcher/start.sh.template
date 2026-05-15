@@ -1103,7 +1103,7 @@ verify_webview_origin() {
     # exception text.
     local body err detail
     err=$(mktemp 2>/dev/null) || err="${TMPDIR:-/tmp}/codex-curl-err.$$"
-    if ! body="$(curl --silent --show-error --fail --max-time 2 "$url" 2>"$err")"; then
+    if ! body="$(curl --disable --silent --show-error --fail --max-time 2 "$url" 2>"$err")"; then
         detail=$(< "$err" 2>/dev/null)
         rm -f "$err"
         echo "Webview origin validation failed for $url; ${detail:-curl exited non-zero with no diagnostic}" >&2
