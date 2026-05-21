@@ -1791,6 +1791,23 @@ test_launcher_template_sanity() {
     assert_contains "$REPO_DIR/launcher/start.sh.template" 'launcher-$CODEX_LINUX_INSTANCE_ID.log'
     assert_contains "$REPO_DIR/launcher/start.sh.template" "ADOPTED_WEBVIEW_PID"
     assert_contains "$REPO_DIR/launcher/start.sh.template" "Reusing webview server pid="
+    assert_contains "$REPO_DIR/launcher/start.sh.template" "run_cold_start_hooks"
+    assert_contains "$REPO_DIR/linux-features/remote-mobile-control/feature.json" '"stageHook": "./stage.sh"'
+    assert_contains "$REPO_DIR/linux-features/remote-mobile-control/stage.sh" "cold-start.d"
+    assert_contains "$REPO_DIR/linux-features/remote-mobile-control/stage.sh" "remote-mobile-control"
+    assert_contains "$REPO_DIR/linux-features/remote-mobile-control/stage.sh" "cold-start-hook.sh"
+    assert_contains "$REPO_DIR/linux-features/remote-mobile-control/cold-start-hook.sh" "remote-control start"
+    assert_contains "$REPO_DIR/linux-features/remote-mobile-control/cold-start-hook.sh" "/run/current-system/sw/bin"
+    assert_contains "$REPO_DIR/linux-features/remote-mobile-control/cold-start-hook.sh" "codex-remote-control.service"
+    assert_contains "$REPO_DIR/linux-features/remote-mobile-control/cold-start-hook.sh" "continuing best-effort in the background"
+    assert_contains "$REPO_DIR/flake.nix" "homeManagerModules"
+    assert_contains "$REPO_DIR/flake.nix" "nixosModules"
+    assert_contains "$REPO_DIR/nix/home-manager-module.nix" "codex-remote-control"
+    assert_contains "$REPO_DIR/nix/home-manager-module.nix" "--remote-control"
+    assert_contains "$REPO_DIR/nix/home-manager-module.nix" "CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED"
+    assert_contains "$REPO_DIR/nix/nixos-module.nix" "codex-remote-control"
+    assert_contains "$REPO_DIR/nix/nixos-module.nix" "--remote-control"
+    assert_contains "$REPO_DIR/nix/nixos-module.nix" "CODEX_REMOTE_CONTROL_DAEMON_AUTOSTART_DISABLED"
     python3 - "$REPO_DIR/launcher/start.sh.template" <<'PY'
 import re
 import sys
@@ -1800,6 +1817,7 @@ detect_body = source.split("detect_warm_start() {", 1)[1].split("send_warm_start
 launch_body = source.split("launch_electron() {", 1)[1].split("load_packaged_runtime_helper", 1)[0]
 runtime_body = source.split("trap cleanup_launcher EXIT", 1)[1].split("launch_electron", 1)[0]
 webview_probe_body = source.split("webview_port_is_open() {", 1)[1].split("wait_for_webview_server() {", 1)[0]
+cold_start_hooks_body = source.split("run_cold_start_hooks() {", 1)[1].split("run_cli_preflight() {", 1)[0]
 stop_body = source.split("stop_owned_webview_server() {", 1)[1].split("owned_webview_server_pid() {", 1)[0]
 stale_body = source.split("pid_is_stale_webview_server() {", 1)[1].split("stop_owned_webview_server() {", 1)[0]
 multi_body = source.split("configure_multi_launch_instance() {", 1)[1].split('WEBVIEW_ORIGIN="http://127.0.0.1:$CODEX_LINUX_WEBVIEW_PORT"', 1)[0]
@@ -1865,8 +1883,8 @@ if "second_instance_handoff_ready" not in runtime_body:
     raise SystemExit("second-instance handoff must skip cold-start setup")
 if "clear_bundled_marketplace_tmp_cache\nmonitor_bundled_marketplace_tmp_permissions\nreconcile_runtime_state" in runtime_body:
     raise SystemExit("warm-start path must not clear bundled marketplace temp cache")
-if not re.search(r'if needs_cold_start; then\s+clear_bundled_marketplace_tmp_cache\s+# The runtime marketplace is populated asynchronously.*?monitor_bundled_marketplace_tmp_permissions\s+sync_browser_use_bundled_plugin_cache\s+sync_chrome_bundled_plugin_cache\s+sync_computer_use_bundled_plugin_cache\s+sync_read_aloud_bundled_plugin_cache\s+fi', runtime_body, re.S):
-    raise SystemExit("bundled marketplace cleanup and plugin sync must run only on cold start")
+if not re.search(r'if needs_cold_start; then\s+clear_bundled_marketplace_tmp_cache\s+# The runtime marketplace is populated asynchronously.*?monitor_bundled_marketplace_tmp_permissions\s+sync_browser_use_bundled_plugin_cache\s+sync_chrome_bundled_plugin_cache\s+sync_computer_use_bundled_plugin_cache\s+sync_read_aloud_bundled_plugin_cache\s+run_cold_start_hooks\s+fi', runtime_body, re.S):
+    raise SystemExit("bundled marketplace cleanup, plugin sync, and cold-start hooks must run only on cold start")
 if 'if needs_cold_start && [ -z "${CODEX_CLI_PATH:-}" ]; then' not in runtime_body:
     raise SystemExit("second-instance handoff must skip CLI lookup")
 if 'if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then' not in runtime_body:
@@ -1875,6 +1893,14 @@ if '"$HOME/.bun/bin/codex"' not in source:
     raise SystemExit("CLI lookup must include bun global install path")
 if "if needs_cold_start;" not in runtime_body:
     raise SystemExit("second-instance handoff must skip CLI preflight")
+if 'run_cold_start_hooks' not in runtime_body:
+    raise SystemExit("cold start must run feature-staged hooks before Electron launches")
+if 'COLD_START_HOOK_DIR' not in cold_start_hooks_body or '"$hook" "$SCRIPT_DIR" "$APP_STATE_DIR" "$LOG_DIR"' not in cold_start_hooks_body:
+    raise SystemExit("launcher cold-start hook runner must be generic and pass standard paths")
+if '>>"$LOG_FILE" 2>&1 &' not in cold_start_hooks_body:
+    raise SystemExit("launcher cold-start hooks must be non-blocking")
+if 'remote_mobile_control_main' in source:
+    raise SystemExit("remote mobile daemon startup must live in the remote-mobile-control feature hook, not the main launcher")
 if "running_app_is_active" not in stop_body or "Preserving webview server" not in stop_body:
     raise SystemExit("stop_owned_webview_server must not stop the live app webview server")
 if "stale_webview_server_pid" not in source or "stop_stale_webview_server" not in source:
@@ -2497,6 +2523,12 @@ JSON
         # shellcheck disable=SC1091
         source "$REPO_DIR/scripts/lib/bundled-plugins.sh"
         stage_linux_computer_use_plugin() { return 1; }
+        build_chrome_extension_host() {
+            local fake_host="$workspace/codex-chrome-extension-host"
+            printf '#!/bin/sh\n' > "$fake_host"
+            chmod +x "$fake_host"
+            printf '%s\n' "$fake_host"
+        }
         install_bundled_plugin_resources "$app_dir"
     ) >"$output_log" 2>&1
 

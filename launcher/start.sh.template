@@ -28,6 +28,7 @@ WEBVIEW_PID_FILE="$APP_STATE_DIR/webview.pid"
 LAUNCH_ACTION_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$APP_STATE_DIR}/$CODEX_LINUX_APP_ID"
 LAUNCH_ACTION_SOCKET="$LAUNCH_ACTION_RUNTIME_DIR/launch-action.sock"
 PACKAGED_RUNTIME_HELPER="$SCRIPT_DIR/.codex-linux/codex-packaged-runtime.sh"
+COLD_START_HOOK_DIR="$SCRIPT_DIR/.codex-linux/cold-start.d"
 MANAGED_NODE_BIN_DIR="$SCRIPT_DIR/resources/node-runtime/bin"
 APP_NOTIFICATION_ICON_NAME="$CODEX_LINUX_APP_ID"
 APP_NOTIFICATION_ICON_BUNDLE="$SCRIPT_DIR/.codex-linux/$APP_NOTIFICATION_ICON_NAME.png"
@@ -973,6 +974,22 @@ resolve_browser_use_runtime_env() {
     if [ -z "${CODEX_NODE_REPL_PATH:-}" ]; then
         echo "Browser Use node_repl runtime not found; in-app browser automation may be unavailable."
     fi
+}
+
+run_cold_start_hooks() {
+    [ -d "$COLD_START_HOOK_DIR" ] || return 0
+    local hook
+    for hook in "$COLD_START_HOOK_DIR"/*; do
+        [ -f "$hook" ] || continue
+        [ -x "$hook" ] || continue
+        echo "Starting cold-start hook: $hook"
+        (
+            CODEX_LINUX_APP_DIR="$SCRIPT_DIR" \
+            CODEX_LINUX_APP_STATE_DIR="$APP_STATE_DIR" \
+            CODEX_LINUX_LAUNCHER_LOG="$LOG_FILE" \
+            "$hook" "$SCRIPT_DIR" "$APP_STATE_DIR" "$LOG_DIR"
+        ) >>"$LOG_FILE" 2>&1 &
+    done
 }
 
 run_cli_preflight() {
@@ -2068,6 +2085,7 @@ if needs_cold_start; then
     sync_chrome_bundled_plugin_cache
     sync_computer_use_bundled_plugin_cache
     sync_read_aloud_bundled_plugin_cache
+    run_cold_start_hooks
 fi
 resolve_browser_use_runtime_env
 
