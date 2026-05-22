@@ -1529,7 +1529,7 @@ test("migrates updater helpers away from captured Electron aliases", () => {
   const patched = applyLinuxAppUpdaterBridgePatch(appUpdaterBundleFixture());
   const oldPatched = patched
     .replace(
-      "function codexLinuxGetElectronModule(){try{return require(`electron`)}catch{try{return require(`node:electron`)}catch{return null}}}",
+      "function codexLinuxGetElectronModule(){try{return require(`electron`)}catch{return null}}",
       "",
     )
     .replace(
@@ -1543,7 +1543,7 @@ test("migrates updater helpers away from captured Electron aliases", () => {
 
   const migrated = applyPatchTwice(applyLinuxAppUpdaterBridgePatch, oldPatched);
 
-  assert.match(migrated, /function codexLinuxGetElectronModule\(\)\{try\{return require\(`electron`\)\}catch\{try\{return require\(`node:electron`\)\}catch\{return null\}\}\}/);
+  assert.match(migrated, /function codexLinuxGetElectronModule\(\)\{try\{return require\(`electron`\)\}catch\{return null\}\}/);
   assert.match(migrated, /function codexLinuxQuitForUpdate\(\)\{try\{codexLinuxInstallAfterQuit\(\);let t=codexLinuxGetElectronModule\(\);if\(!t\)return;let e=setTimeout\(\(\)=>t\.app\?\.exit\?\.\(0\),1500\);e\.unref\?\.\(\),t\.app\?\.quit\?\.\(\)\}catch\{\}\}/);
   assert.doesNotMatch(migrated, /setTimeout\(\(\)=>electron\.app\?\.exit\?\.\(0\),1500\)/);
   assert.doesNotMatch(migrated, /await electron\.dialog\?\.showMessageBox/);
