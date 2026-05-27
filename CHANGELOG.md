@@ -22,6 +22,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Nix builds now rewrite crates.io API crate download URLs to the static
+  crates.io CDN path, avoiding PR-only CI failures from crates.io API 403s
+  while preserving the same lockfile checksums.
 - Bundled Browser plugin staging now preserves local `file://` target support
   advertised by the Browser plugin while keeping remote file hosts and `data:`
   URLs blocked by the URL policy.
