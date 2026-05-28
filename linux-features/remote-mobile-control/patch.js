@@ -205,6 +205,13 @@ function applyLinuxRemoteControlClientAccountCompatibilityPatch(source) {
   ) {
     return source;
   }
+  if (
+    source.includes("function tp({authIdentity:e,connectionKey:t,deviceKeyClient:n,globalState:r}){let i=(await Promise.all(np(e).map(async e=>{let i=Mf(t,e);return{key:i,record:await ip({deviceKeyClient:n,enrollmentKey:i,globalState:r})}}))).find(e=>e.record!=null);return i?.record==null?null:{key:i.key,record:i.record}}") &&
+    source.includes("function np(e){if(e.tokenAccountUserId==null)return[];let t=[e.tokenAccountUserId];return e.tokenAccountId!=null&&e.headerChatGptAccountId===e.tokenAccountId&&e.tokenAuthUserId!=null&&e.tokenAuthUserId!==e.tokenAccountUserId&&t.push(e.tokenAuthUserId),t}") &&
+    source.includes("u?.key??Mf(r,c)")
+  ) {
+    return source;
+  }
 
   // 26.527.x ships the multi-account enrollment compatibility natively (the
   // helpers were renamed, e.g. ep->wh / tp->Th). Detect both the candidate-id
