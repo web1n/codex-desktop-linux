@@ -1303,8 +1303,9 @@ resolve_update_manager_path() {
     for candidate in \
         "$SCRIPT_DIR/../target/release/codex-update-manager" \
         "$SCRIPT_DIR/codex-update-manager" \
-        "/usr/bin/codex-update-manager" \
-        "/usr/local/bin/codex-update-manager"
+        "${HOME:-}/.local/bin/codex-update-manager" \
+        "/usr/local/bin/codex-update-manager" \
+        "/usr/bin/codex-update-manager"
     do
         if [ -x "$candidate" ]; then
             CODEX_UPDATE_MANAGER_PATH="$(canonical_path "$candidate")"
@@ -2357,5 +2358,11 @@ resolve_browser_use_runtime_env
 
 echo "Using CODEX_CLI_PATH=${CODEX_CLI_PATH:-warm-start-skip}"
 echo "Using managed Node.js runtime=${CODEX_MANAGED_NODE_RUNTIME_DIR:-$SCRIPT_DIR/resources/node-runtime}"
+
+# Resolve and export the absolute updater path so in-app features (e.g. the
+# wrapper Update button) can spawn it regardless of the Electron process PATH.
+if resolve_update_manager_path >/dev/null 2>&1; then
+    export CODEX_UPDATE_MANAGER_PATH
+fi
 
 launch_electron "${LAUNCHER_ARGS[@]}"
