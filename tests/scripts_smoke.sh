@@ -2860,8 +2860,10 @@ if 'Adopted concurrently-started verified webview server' not in source:
     raise SystemExit("launcher must tolerate a concurrent verified webview server winning the bind race")
 if 'RUNNING_APP_PID="$(find_running_app_pid)"' not in detect_body:
     raise SystemExit("detect_warm_start must record a pid-file running app even when warm start is disabled")
-if '[ -S "$LAUNCH_ACTION_SOCKET" ] && RUNNING_APP_PID="$(discover_running_app_pid)"' not in detect_body:
-    raise SystemExit("detect_warm_start must only use the expensive running-app scan when the launch socket exists")
+if 'RUNNING_APP_PID="$(find_running_app_pid)" || RUNNING_APP_PID="$(discover_running_app_pid)"' not in detect_body:
+    raise SystemExit("detect_warm_start must fall back to the running-app scan even when the launch socket is missing")
+if '[ -S "$LAUNCH_ACTION_SOCKET" ]' in detect_body:
+    raise SystemExit("detect_warm_start must not gate the running-app scan on launch socket existence; hidden instances can lose the socket")
 if not re.search(r'if ! linux_setting_enabled "codex-linux-warm-start-enabled" 1; then.*?return 0', detect_body, re.S):
     raise SystemExit("detect_warm_start must not fail when warm start is disabled")
 if "preserving liveness marker for second-instance handoff" not in detect_body:
@@ -2891,8 +2893,8 @@ if "clear_bundled_marketplace_tmp_cache\nmonitor_bundled_marketplace_tmp_permiss
     raise SystemExit("warm-start path must not clear bundled marketplace temp cache")
 if not re.search(r'if needs_cold_start; then\s+clear_bundled_marketplace_tmp_cache\s+# The runtime marketplace is populated asynchronously.*?monitor_bundled_marketplace_tmp_permissions\s+sync_browser_use_bundled_plugin_cache\s+sync_chrome_bundled_plugin_cache\s+sync_computer_use_bundled_plugin_cache\s+sync_read_aloud_bundled_plugin_cache\s+run_cold_start_hooks\s+fi', runtime_body, re.S):
     raise SystemExit("bundled marketplace cleanup, plugin sync, and cold-start hooks must run only on cold start")
-if 'if needs_cold_start && [ -z "${CODEX_CLI_PATH:-}" ]; then' not in runtime_body:
-    raise SystemExit("second-instance handoff must skip CLI lookup")
+if 'if [ -z "${CODEX_CLI_PATH:-}" ]; then' not in runtime_body:
+    raise SystemExit("launcher must run the cheap CLI lookup even for second-instance fallback")
 if 'if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then' not in runtime_body:
     raise SystemExit("second-instance handoff must skip missing-CLI failure")
 if '"$HOME/.bun/bin/codex"' not in source:
@@ -2934,7 +2936,7 @@ if ensure_body.find("stop_stale_webview_server") > ensure_body.find("is already 
     raise SystemExit("ensure_webview_server must try stale-server cleanup before foreign reachable-port failure")
 if "Keeping the live app untouched" not in ensure_body:
     raise SystemExit("ensure_webview_server must not stop a live app server when validation fails")
-if 'if live_app_pid="$(find_running_app_pid)" || { [ -S "$LAUNCH_ACTION_SOCKET" ] && live_app_pid="$(discover_running_app_pid)"; }; then' not in reconcile_body:
+if 'if live_app_pid="$(find_running_app_pid)" || live_app_pid="$(discover_running_app_pid)"; then' not in reconcile_body:
     raise SystemExit("reconcile_runtime_state must preserve runtime markers when a live app still exists")
 if 'rm -f "$LAUNCH_ACTION_SOCKET"' not in reconcile_body:
     raise SystemExit("reconcile_runtime_state must clear a stale launch-action socket when no live app exists")
@@ -2942,6 +2944,22 @@ if 'clear_stale_pid_file' not in reconcile_body:
     raise SystemExit("reconcile_runtime_state must still clear stale app.pid markers")
 if 'if [ -z "$webview_pid" ] || { ! pid_is_webview_server "$webview_pid" && ! pid_is_stale_webview_server "$webview_pid"; }; then' not in reconcile_body:
     raise SystemExit("reconcile_runtime_state must clear stale launcher webview ownership markers without touching valid orphaned servers")
+discover_body = source.split("discover_running_app_pid() {", 1)[1].split("running_app_is_active() {", 1)[0]
+if 'pid_in_same_launch_instance "$pid"' not in discover_body:
+    raise SystemExit("discover_running_app_pid must filter by launch instance so default and side-by-side apps never adopt each other")
+instance_match_body = source.split("pid_in_same_launch_instance() {", 1)[1].split("discover_running_app_pid() {", 1)[0]
+if 'CODEX_LINUX_INSTANCE_ID=$CODEX_LINUX_INSTANCE_ID' not in instance_match_body or 'CODEX_LINUX_MULTI_LAUNCH=1' not in instance_match_body:
+    raise SystemExit("pid_in_same_launch_instance must match instance identity from the process environment")
+if 'refresh_launch_state\ntrap cleanup_launcher EXIT' not in source:
+    raise SystemExit("launcher must do an initial runtime-state refresh before warm-start IPC")
+if 'if needs_cold_start; then\n    acquire_launcher_lock\n    refresh_launch_state\nfi' not in source:
+    raise SystemExit("launcher must re-check runtime state under the launcher lock immediately before cold launch")
+if 'flock -w 30 9' not in source:
+    raise SystemExit("launcher lock must use a bounded flock wait so a stuck launcher cannot block launches forever")
+if launch_body.count("release_launcher_lock") != 2:
+    raise SystemExit("launch_electron must release the launcher lock on both the warm-start and cold-start paths")
+if launch_body.index("release_launcher_lock", launch_body.index('echo "$ELECTRON_PID" > "$APP_PID_FILE"')) > launch_body.index('wait "$ELECTRON_PID"'):
+    raise SystemExit("launch_electron must release the launcher lock after writing app.pid and before waiting on Electron")
 PY
     local launcher_probe
     local output
