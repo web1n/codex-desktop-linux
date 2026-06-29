@@ -1277,7 +1277,7 @@ test("settings asset patch adds read aloud controls to generated Linux desktop s
     const asset = path.join(assets, "linux-desktop-settings-linux.js");
     fs.writeFileSync(
       asset,
-      'var React={Fragment:{}},$={jsx(){},jsxs(){}},KEYS={promptWindow:"codex-linux-prompt-window-enabled",systemTray:"codex-linux-system-tray-enabled",warmStart:"codex-linux-warm-start-enabled",autoUpdateOnExit:"codex-linux-auto-update-on-exit"};function useLinuxSetting(){}function LinuxSettingsRow(){}function LinuxSettingsSection(){}function LinuxToggle(){}function LinuxBuildInfoPanel(){}function LinuxDesktopSettings(){return $.jsxs("div",{children:[$.jsx(LinuxSettingsSection,{title:"Updates",children:$.jsx(LinuxToggle,{settingKey:KEYS.autoUpdateOnExit,label:"Install updates when you close Codex",description:"When on, a ready update waits for Codex to close and then installs. When off, updates wait until you click Update."})}),$.jsx(LinuxSettingsSection,{title:"Build",children:$.jsx(LinuxBuildInfoPanel,{})})]})}export{LinuxDesktopSettings,LinuxDesktopSettings as default};',
+      'var React={Fragment:{}},$={jsx(){},jsxs(){}},KEYS={promptWindow:"codex-linux-prompt-window-enabled",systemTray:"codex-linux-system-tray-enabled",warmStart:"codex-linux-warm-start-enabled",autoUpdateOnExit:"codex-linux-auto-update-on-exit"};function useLinuxSetting(){}function SettingsRow(){}function SettingsSection(){}function SettingsGroup(){}function SettingsPage(){}function Toggle(){}function LinuxToggle(){}function LinuxBuildInfoPanel(){}function LinuxDesktopSettings(){return $.jsx(SettingsPage,{title:"Linux desktop",subtitle:"Launcher, tray, prompt window, and update behavior.",children:$.jsxs("div",{className:"flex flex-col gap-6",children:[$.jsxs(SettingsSection,{className:"gap-2",children:[$.jsx(SettingsSection.Header,{title:"Updates"}),$.jsx(SettingsSection.Content,{children:$.jsx(SettingsGroup,{children:$.jsx(LinuxToggle,{settingKey:KEYS.autoUpdateOnExit,label:"Install updates when you close Codex",description:"When on, a ready update waits for Codex to close and then installs. When off, updates wait until you click Update."})})})]}),$.jsxs(SettingsSection,{className:"gap-2",children:[$.jsx(SettingsSection.Header,{title:"Build"}),$.jsx(SettingsSection.Content,{children:$.jsx(SettingsGroup,{children:$.jsx(LinuxBuildInfoPanel,{})})})]})]})})}export{LinuxDesktopSettings,LinuxDesktopSettings as default};',
     );
 
     assert.deepEqual(applySettingsAssetPatch(root), { matched: true, changed: 1 });
@@ -1290,7 +1290,12 @@ test("settings asset patch adds read aloud controls to generated Linux desktop s
     assert.match(patched, /children:"Choose folder"/);
     assert.match(patched, /children:"Download voice"/);
     assert.match(patched, /label:"Speech pace"/);
-    assert.match(patched, /\$\.jsx\(LinuxReadAloudSettings,\{\}\),\$\.jsx\(LinuxSettingsSection,\{title:"Build"/);
+    assert.match(
+      patched,
+      /\$\.jsx\(LinuxReadAloudSettings,\{\}\),\$\.jsxs\(SettingsSection,\{className:"gap-2",children:\[\$\.jsx\(SettingsSection\.Header,\{title:"Build"/,
+    );
+    assert.doesNotMatch(patched, /LinuxSettingsSection/);
+    assert.doesNotMatch(patched, /LinuxSettingsRow/);
     assert.deepEqual(applySettingsAssetPatch(root), { matched: true, changed: 0 });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
