@@ -6190,6 +6190,27 @@ test("falls back to Electron when sanitized xdg-open spawning fails", async () =
   assert.deepEqual(originalCalls, [{ url: "https://example.test/docs", options: undefined }]);
 });
 
+test("keeps already-applied Linux external-open patch quiet", () => {
+  const source =
+    "\"use strict\";let e=require(`electron`);async function openExternal(url,options){return e.shell.openExternal(url,options)}";
+  const patched = applyLinuxExternalOpenEnvPatch(source);
+  const { value, warnings } = captureWarns(() => applyLinuxExternalOpenEnvPatch(patched));
+
+  assert.equal(value, patched);
+  assert.deepEqual(warnings, []);
+});
+
+test("warns when Linux external-open helper exists without wrapped Electron require", () => {
+  const source =
+    "\"use strict\";function codexLinuxPatchExternalOpen(e){return e}let {shell:e}=require(`electron`);";
+  const { value, warnings } = captureWarns(() => applyLinuxExternalOpenEnvPatch(source));
+
+  assert.equal(value, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find Electron require initializer — skipping Linux external open environment patch",
+  ]);
+});
+
 test("auto-approves the app-provided Browser Use node_repl bridge", () => {
   const source =
     "return{[`mcp_servers.${pt}`]:{command:i.nodeReplPath,args:[],startup_timeout_sec:120,env:{[dt]:l,[ft]:i.nodePath}}}";

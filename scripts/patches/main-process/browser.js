@@ -331,6 +331,9 @@ function buildLinuxExternalOpenHelpers() {
 
 function applyLinuxExternalOpenEnvPatch(currentSource) {
   const hasHelper = currentSource.includes("function codexLinuxPatchExternalOpen(");
+  const hasPatchedElectronRequire = /codexLinuxPatchExternalOpen\(require\(([`'"])electron\1\)\)/.test(
+    currentSource,
+  );
   let patchedAnyElectronRequire = false;
   const patchedSource = currentSource.replace(
     /([A-Za-z_$][\w$]*=)require\(([`'"])electron\2\)/g,
@@ -341,7 +344,7 @@ function applyLinuxExternalOpenEnvPatch(currentSource) {
   );
 
   if (!patchedAnyElectronRequire) {
-    if (!hasHelper) {
+    if (!(hasHelper && hasPatchedElectronRequire)) {
       console.warn(
         "WARN: Could not find Electron require initializer — skipping Linux external open environment patch",
       );
