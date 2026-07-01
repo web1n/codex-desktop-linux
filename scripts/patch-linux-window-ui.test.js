@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
+const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -42,6 +43,7 @@ const {
   applyLinuxExplicitIpcQuitPatch,
   applyLinuxExplicitQuitPromptBypassPatch,
   applyLinuxExplicitTrayQuitPatch,
+  applyLinuxExternalOpenEnvPatch,
   applyLinuxFileManagerPatch,
   applyLinuxGitOriginsSourceFallbackPatch,
   applyLinuxWorkerFileManagerPatch,
@@ -6070,6 +6072,122 @@ test("allows current required-feature Computer Use gate on Linux", () => {
     patched,
     /g=Hj\(\{areRequiredFeaturesEnabled:o===`linux`\|\|h,enabled:i,isAnyFeatureLoading:o===`linux`\?!1:m,isComputerUseGateEnabled:o===`linux`\|\|s,isHostCompatiblePlatform:o===`linux`\|\|Rj\(o\),isPlatformLoading:a,windowType:`electron`\}\)/,
   );
+});
+
+function externalOpenChildClosingWith(code) {
+  const child = new EventEmitter();
+  child.unref = () => {};
+  setImmediate(() => child.emit("close", code));
+  return child;
+}
+
+function externalOpenChildFailingWith(error) {
+  const child = new EventEmitter();
+  child.unref = () => {};
+  setImmediate(() => child.emit("error", error));
+  return child;
+}
+
+function evaluatePatchedExternalOpen({
+  env = {},
+  platform = "linux",
+  spawn = () => {
+    throw new Error("unexpected xdg-open spawn");
+  },
+  originalOpenExternal = async () => undefined,
+} = {}) {
+  const originalCalls = [];
+  const electron = {
+    shell: {
+      openExternal(url, options) {
+        originalCalls.push({ url, options });
+        return originalOpenExternal(url, options);
+      },
+    },
+  };
+  const source =
+    "\"use strict\";let e=require(`electron`);async function openExternal(url,options){return e.shell.openExternal(url,options)}";
+  const patched = applyPatchTwice(applyLinuxExternalOpenEnvPatch, source);
+  const openExternal = vm.runInNewContext(`${patched};openExternal`, {
+    require(moduleName) {
+      if (moduleName === "electron") return electron;
+      if (moduleName === "node:child_process") return { spawn };
+      throw new Error(`unexpected module: ${moduleName}`);
+    },
+    process: { platform, env },
+    setTimeout,
+    clearTimeout,
+  });
+  return { openExternal, originalCalls };
+}
+
+test("sanitizes Linux external-open environment before xdg-open", async () => {
+  const spawnCalls = [];
+  const env = {
+    PATH: "/usr/bin",
+    DISPLAY: ":1",
+    LD_LIBRARY_PATH: "/tmp/bad",
+    LD_PRELOAD: "/tmp/preload.so",
+    NODE_OPTIONS: "--require /tmp/hook.js",
+    CODEX_LINUX_WEBVIEW_PORT: "1234",
+  };
+  const { openExternal, originalCalls } = evaluatePatchedExternalOpen({
+    env,
+    spawn(command, args, options) {
+      spawnCalls.push({ command, args, options });
+      return externalOpenChildClosingWith(0);
+    },
+  });
+
+  await openExternal("https://example.test/docs");
+
+  assert.deepEqual(originalCalls, []);
+  assert.equal(spawnCalls.length, 1);
+  assert.equal(spawnCalls[0].command, "xdg-open");
+  assert.deepEqual(Array.from(spawnCalls[0].args), ["https://example.test/docs"]);
+  assert.equal(spawnCalls[0].options.detached, true);
+  assert.equal(spawnCalls[0].options.stdio, "ignore");
+  assert.equal(spawnCalls[0].options.env.PATH, "/usr/bin");
+  assert.equal(spawnCalls[0].options.env.DISPLAY, ":1");
+  for (const key of [
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "NODE_OPTIONS",
+    "CODEX_LINUX_WEBVIEW_PORT",
+  ]) {
+    assert.equal(Object.hasOwn(spawnCalls[0].options.env, key), false);
+  }
+});
+
+test("delegates non-string Linux external-open targets to Electron", async () => {
+  const target = { href: "https://example.test/docs" };
+  const options = { activate: false };
+  const { openExternal, originalCalls } = evaluatePatchedExternalOpen({
+    originalOpenExternal: async () => "delegated",
+  });
+
+  assert.equal(await openExternal(target, options), "delegated");
+  assert.deepEqual(originalCalls, [{ url: target, options }]);
+});
+
+test("delegates Linux external-open calls with options to Electron", async () => {
+  const options = { activate: false };
+  const { openExternal, originalCalls } = evaluatePatchedExternalOpen({
+    originalOpenExternal: async () => "delegated",
+  });
+
+  assert.equal(await openExternal("https://example.test/docs", options), "delegated");
+  assert.deepEqual(originalCalls, [{ url: "https://example.test/docs", options }]);
+});
+
+test("falls back to Electron when sanitized xdg-open spawning fails", async () => {
+  const { openExternal, originalCalls } = evaluatePatchedExternalOpen({
+    spawn: () => externalOpenChildFailingWith(new Error("xdg-open missing")),
+    originalOpenExternal: async () => "fallback",
+  });
+
+  assert.equal(await openExternal("https://example.test/docs"), "fallback");
+  assert.deepEqual(originalCalls, [{ url: "https://example.test/docs", options: undefined }]);
 });
 
 test("auto-approves the app-provided Browser Use node_repl bridge", () => {
