@@ -1408,24 +1408,45 @@ find_codex_cli() {
     return 1
 }
 
+pid_parent_matches() {
+    local pid="$1"
+    local expected_parent="$2"
+    local stat_line
+    local rest
+
+    [ -r "/proc/$pid/stat" ] || return 1
+    stat_line=$(< "/proc/$pid/stat") || return 1
+    rest=${stat_line##*) }
+    set -- $rest
+    # $1 = state, $2 = ppid
+    [ "${2:-}" = "$expected_parent" ]
+}
+
 codex_cli_version_probe() {
     local output_file="$1"
     shift
     local marker="${output_file}.timed-out"
     local probe_pid
     local watchdog_pid
+    local self_pid=$$
     local status=0
 
     rm -f "$marker"
-    "$@" >"$output_file" 2>/dev/null &
+    ( trap - EXIT
+      { exec 9>&-; } 2>/dev/null || true
+      exec "$@" >"$output_file" 2>/dev/null
+    ) &
     probe_pid="$!"
     ( trap - EXIT
+      { exec 9>&-; } 2>/dev/null || true
       sleep 1
-      if kill -0 "$probe_pid" 2>/dev/null; then
+      if pid_parent_matches "$probe_pid" "$self_pid"; then
           : > "$marker"
           kill "$probe_pid" 2>/dev/null || true
           sleep 0.05
-          kill -9 "$probe_pid" 2>/dev/null || true
+          if pid_parent_matches "$probe_pid" "$self_pid"; then
+              kill -9 "$probe_pid" 2>/dev/null || true
+          fi
       fi
     ) &
     watchdog_pid="$!"

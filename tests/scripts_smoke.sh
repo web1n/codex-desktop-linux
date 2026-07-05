@@ -3755,6 +3755,10 @@ if "codex_cli_version_probe()" not in source or "codex_cli_version()" not in sou
     raise SystemExit("CLI lookup must log a bounded best-effort resolved CLI version probe")
 if "version unknown; set CODEX_CLI_PATH=/path/to/codex" not in source:
     raise SystemExit("CLI lookup diagnostics must explain explicit CODEX_CLI_PATH pinning")
+if 'pid_parent_matches "$probe_pid" "$self_pid"' not in source:
+    raise SystemExit("CLI version probe watchdog must guard kills against PID reuse")
+if source.count('{ exec 9>&-; } 2>/dev/null || true') < 3:
+    raise SystemExit("CLI version probe children and Electron child must close launcher lock fd 9")
 for unexpected in ("find_codex_cli_entry", "codex_cli_version_compare", "codex_cli_version_gt", "sort -V"):
     if unexpected in source:
         raise SystemExit(f"launcher must not rank discovered CLI candidates with {unexpected}")
@@ -4244,7 +4248,7 @@ import sys
 
 source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 functions = []
-for name in ("find_codex_cli", "codex_cli_version_probe", "codex_cli_version", "log_codex_cli_path"):
+for name in ("find_codex_cli", "pid_parent_matches", "codex_cli_version_probe", "codex_cli_version", "log_codex_cli_path"):
     match = re.search(r"^" + re.escape(name) + r"\(\) \{[\s\S]*?^\}\n", source, re.M)
     if match is None:
         raise SystemExit(f"missing {name}")
@@ -4314,6 +4318,21 @@ PY
     chmod +x "$unknown_cli"
     log_output="$(env -i PATH="/usr/bin:/bin" HOME="$fake_home" "$launcher_probe" log "$unknown_cli")"
     [[ "$log_output" == "Using CODEX_CLI_PATH=$unknown_cli (version unknown; set CODEX_CLI_PATH=/path/to/codex to pin a known CLI)" ]] || fail "CLI diagnostics must explain unknown versions and explicit pinning: $log_output"
+
+    local fd_probe_cli="$workspace/fd-probe-codex"
+    local fd_state="$workspace/fd9.state"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'if { true >&9; } 2>/dev/null; then printf "open\\n" > %q; else printf "closed\\n" > %q; fi\n' "$fd_state" "$fd_state"
+        printf 'printf "codex-cli 0.200.0\\n"\n'
+    } > "$fd_probe_cli"
+    chmod +x "$fd_probe_cli"
+    version_output="$(
+        exec 9>"$workspace/launcher.lock"
+        env -i PATH="/usr/bin:/bin" HOME="$fake_home" "$launcher_probe" version "$fd_probe_cli"
+    )"
+    [ "$version_output" = "0.200.0" ] || fail "fd-guarded CLI probe must still read versions, got $version_output"
+    [ "$(cat "$fd_state")" = "closed" ] || fail "CLI version probe child must not inherit launcher lock fd 9"
 
     local hanging_cli="$workspace/hanging-codex"
     local hanging_pid_file="$workspace/hanging.pid"
