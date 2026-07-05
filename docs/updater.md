@@ -15,6 +15,11 @@ It:
   command when no auth agent is available
 - performs best-effort Codex CLI preflight from the launcher
 
+Codex CLI preflight preserves the detected CLI install type. npm-managed
+installs continue to update through npm, while official standalone installs
+under `~/.codex/packages/standalone` are updated with the official standalone
+installer instead of being replaced through npm.
+
 ## Inspect State
 
 ```bash
