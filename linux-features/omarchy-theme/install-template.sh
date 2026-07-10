@@ -23,7 +23,7 @@ if [ ! -f "$source_path" ]; then
     exit 0
 fi
 
-omarchy_home="${CODEX_OMARCHY_CONFIG_HOME:-$HOME/.config/omarchy}"
+omarchy_home="$HOME/.config/omarchy"
 target_dir="$omarchy_home/themed"
 target_path="$target_dir/codex-desktop.css.tpl"
 generated_path="$omarchy_home/current/theme/codex-desktop.css"
@@ -52,6 +52,20 @@ if ! command -v omarchy >/dev/null 2>&1; then
     exit 0
 fi
 
-if ! omarchy theme refresh; then
-    warn "'omarchy theme refresh' failed; run it manually to generate the Codex stylesheet"
+refresh_timeout_seconds="${CODEX_OMARCHY_THEME_REFRESH_TIMEOUT_SECONDS:-15}"
+case "$refresh_timeout_seconds" in
+    [1-9]|[1-5][0-9]|60) ;;
+    *)
+        warn "refresh timeout must be a whole number between 1 and 60 seconds; using 15 seconds"
+        refresh_timeout_seconds=15
+        ;;
+esac
+
+if ! command -v timeout >/dev/null 2>&1; then
+    warn "timeout command not found; skipping automatic refresh to avoid blocking app launch"
+    exit 0
+fi
+
+if ! timeout --kill-after=2s "${refresh_timeout_seconds}s" omarchy theme refresh; then
+    warn "'omarchy theme refresh' timed out or failed; run it manually to generate the Codex stylesheet"
 fi

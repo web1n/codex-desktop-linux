@@ -50,10 +50,10 @@ seconds.
 
 - `CODEX_LINUX_WEBVIEW_USER_STYLESHEET=/absolute/or/~/path.css` overrides the
   generated CSS file served to Codex.
-- `CODEX_OMARCHY_CONFIG_HOME=/path/to/omarchy` overrides the default
-  `~/.config/omarchy` directory.
 - `CODEX_OMARCHY_THEME_AUTO_REFRESH=0` prevents the first-launch hook from
   invoking `omarchy theme refresh`.
+- `CODEX_OMARCHY_THEME_REFRESH_TIMEOUT_SECONDS=15` changes the bounded wait for
+  that refresh. Values must be whole seconds between 1 and 60.
 
 The generic stylesheet endpoint returns empty CSS when the configured file is
 missing, not a regular file, unreadable, or larger than 256 KiB.

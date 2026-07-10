@@ -5,7 +5,6 @@ import functools
 import http.server
 import os
 import posixpath
-import re
 import signal
 import sys
 import urllib.parse
@@ -13,7 +12,6 @@ import urllib.parse
 
 USER_STYLESHEET_ENDPOINT = "/__codex_user_stylesheet.css"
 MAX_USER_STYLESHEET_BYTES = 256 * 1024
-SHELL_DEFAULT_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^{}]*)\}")
 
 
 def _install_parent_death_signal():
@@ -69,10 +67,6 @@ class CodexWebviewHandler(http.server.SimpleHTTPRequestHandler):
             configured = os.environ.get("CODEX_LINUX_WEBVIEW_USER_STYLESHEET_DEFAULT", "").strip()
         if not configured:
             return None
-        configured = SHELL_DEFAULT_VAR_PATTERN.sub(
-            lambda match: os.environ.get(match.group(1)) or match.group(2),
-            configured,
-        )
         return os.path.expanduser(os.path.expandvars(configured))
 
     def serve_user_stylesheet(self):

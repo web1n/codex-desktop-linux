@@ -296,36 +296,12 @@ test("webview server safely serves default and overridden user stylesheets", asy
       webviewDir,
       {
         HOME: defaultHome,
-        CODEX_OMARCHY_CONFIG_HOME: "",
         CODEX_LINUX_WEBVIEW_USER_STYLESHEET_DEFAULT: configuredDefault,
       },
       async (port) => {
         const defaultConfigured = await request(port, THEME_CSS_ENDPOINT);
         assert.equal(defaultConfigured.status, 200);
         assert.equal(defaultConfigured.body.toString(), "body{color:default-config}");
-      },
-    );
-
-    const customOmarchyHome = path.join(tempDir, "custom-omarchy");
-    const customGeneratedCss = path.join(
-      customOmarchyHome,
-      "current",
-      "theme",
-      "codex-desktop.css",
-    );
-    fs.mkdirSync(path.dirname(customGeneratedCss), { recursive: true });
-    fs.writeFileSync(customGeneratedCss, "body{color:custom-config}");
-    await withWebviewServer(
-      serverPath,
-      webviewDir,
-      {
-        CODEX_OMARCHY_CONFIG_HOME: customOmarchyHome,
-        CODEX_LINUX_WEBVIEW_USER_STYLESHEET_DEFAULT: configuredDefault,
-      },
-      async (port) => {
-        const customized = await request(port, THEME_CSS_ENDPOINT);
-        assert.equal(customized.status, 200);
-        assert.equal(customized.body.toString(), "body{color:custom-config}");
       },
     );
 
@@ -366,7 +342,7 @@ test("prelaunch hook installs the template, refreshes missing CSS, and preserves
     const fakeOmarchy = path.join(binDir, "omarchy");
     fs.writeFileSync(
       fakeOmarchy,
-      `#!/usr/bin/env bash\nset -e\nprintf '%s\\n' "$*" >> "$OMARCHY_TEST_LOG"\nmkdir -p "$CODEX_OMARCHY_CONFIG_HOME/current/theme"\nprintf 'generated' > "$CODEX_OMARCHY_CONFIG_HOME/current/theme/codex-desktop.css"\n`,
+      `#!/usr/bin/env bash\nset -e\nprintf '%s\\n' "$*" >> "$OMARCHY_TEST_LOG"\nmkdir -p "$HOME/.config/omarchy/current/theme"\nprintf 'generated' > "$HOME/.config/omarchy/current/theme/codex-desktop.css"\n`,
     );
     fs.chmodSync(fakeOmarchy, 0o755);
 
@@ -375,7 +351,6 @@ test("prelaunch hook installs the template, refreshes missing CSS, and preserves
       HOME: home,
       PATH: `${binDir}:/usr/bin:/bin`,
       CODEX_LINUX_FEATURES_DIR: featuresDir,
-      CODEX_OMARCHY_CONFIG_HOME: omarchyHome,
       OMARCHY_TEST_LOG: callLog,
     };
     const first = spawnSync("bash", [path.join(FEATURE_DIR, "install-template.sh")], {
@@ -398,6 +373,42 @@ test("prelaunch hook installs the template, refreshes missing CSS, and preserves
     assert.equal(fs.readFileSync(generated, "utf8"), "generated");
     assert.equal(fs.readFileSync(callLog, "utf8"), "theme refresh\ntheme refresh\n");
     assert.match(second.stderr, /leaving it untouched/);
+
+    fs.rmSync(generated);
+    fs.writeFileSync(
+      fakeOmarchy,
+      "#!/usr/bin/env bash\nsleep 30\n",
+    );
+    const startedAt = Date.now();
+    const hanging = spawnSync("bash", [path.join(FEATURE_DIR, "install-template.sh")], {
+      env: {
+        ...env,
+        CODEX_OMARCHY_THEME_REFRESH_TIMEOUT_SECONDS: "1",
+      },
+      encoding: "utf8",
+    });
+    assert.equal(hanging.status, 0, hanging.stderr);
+    assert.ok(Date.now() - startedAt < 5000, "prelaunch hook must not wait for a hung refresh");
+    assert.match(hanging.stderr, /timed out or failed/);
+    assert.equal(fs.existsSync(generated), false);
+
+    const timeoutLog = path.join(tempDir, "timeout.log");
+    fs.writeFileSync(
+      path.join(binDir, "timeout"),
+      `#!/usr/bin/env bash\nprintf '%s\\n' "$*" > "$OMARCHY_TEST_TIMEOUT_LOG"\nexit 124\n`,
+    );
+    fs.chmodSync(path.join(binDir, "timeout"), 0o755);
+    const oversizedTimeout = spawnSync("bash", [path.join(FEATURE_DIR, "install-template.sh")], {
+      env: {
+        ...env,
+        CODEX_OMARCHY_THEME_REFRESH_TIMEOUT_SECONDS: "999999999999999999999",
+        OMARCHY_TEST_TIMEOUT_LOG: timeoutLog,
+      },
+      encoding: "utf8",
+    });
+    assert.equal(oversizedTimeout.status, 0, oversizedTimeout.stderr);
+    assert.match(oversizedTimeout.stderr, /whole number between 1 and 60 seconds/);
+    assert.equal(fs.readFileSync(timeoutLog, "utf8"), "--kill-after=2s 15s omarchy theme refresh\n");
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
