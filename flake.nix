@@ -171,6 +171,28 @@
           };
         };
 
+        codexGlobalDictationBinary = pkgs.rustPlatform.buildRustPackage {
+          pname = "codex-global-dictation-linux";
+          version = "0.1.0";
+          src = ./global-dictation-linux;
+
+          cargoLock = {
+            lockFile = ./global-dictation-linux/Cargo.lock;
+          };
+
+          doCheck = false;
+
+          installPhase = ''
+            runHook preInstall
+            release_dir="target/''${CARGO_BUILD_TARGET:-${pkgs.stdenv.hostPlatform.rust.rustcTarget}}/release"
+            if [ ! -d "$release_dir" ]; then
+              release_dir="target/release"
+            fi
+            install -Dm0755 "$release_dir/codex-global-dictation-linux" "$out/bin/codex-global-dictation-linux"
+            runHook postInstall
+          '';
+        };
+
         nativeModulesNodeModules = pkgs.importNpmLock.buildNodeModules {
           npmRoot = ./nix/native-modules;
           inherit (pkgs) nodejs;
@@ -296,6 +318,11 @@
           python3
           systemd
           xdg-utils
+        ]);
+        globalDictationRuntimePath = pkgs.lib.makeBinPath (with pkgs; [
+          xdotool
+          xinput
+          xmodmap
         ]);
 
         patchNixInstalledApp = installDir: ''
@@ -470,6 +497,9 @@ PY
             ${pkgs.lib.optionalString (builtins.elem "mcp-helper-reaper" linuxFeatureIds) ''
             export CODEX_MCP_HELPER_REAPER_SOURCE="${codexMcpHelperReaper}/bin/codex-mcp-helper-reaper"
             ''}
+            ${pkgs.lib.optionalString (builtins.elem "global-dictation" linuxFeatureIds) ''
+            export CODEX_GLOBAL_DICTATION_LINUX_SOURCE="${codexGlobalDictationBinary}/bin/codex-global-dictation-linux"
+            ''}
             mkdir -p "$HOME" "$npm_config_cache" "$CARGO_HOME"
 
             source_dir="$TMPDIR/codex-source"
@@ -508,6 +538,9 @@ PY
             inherit enableComputerUseUi;
             linuxFeatureIds = normalizedLinuxFeatureIds;
           };
+          payloadLauncherPath = launcherPath + pkgs.lib.optionalString
+            (builtins.elem "global-dictation" normalizedLinuxFeatureIds)
+            ":${globalDictationRuntimePath}";
         in
         pkgs.stdenv.mkDerivation {
           pname = "codex-desktop${packageSuffix featureArgs}";
@@ -581,7 +614,7 @@ PY
               --replace-fail "/usr/share/applications/codex-desktop.desktop" "$out/share/applications/codex-desktop.desktop"
 
             makeWrapper "$out/opt/codex-desktop/start.sh" "$out/bin/codex-desktop" \
-              --prefix PATH : "${launcherPath}" \
+              --prefix PATH : "${payloadLauncherPath}" \
               --prefix LD_LIBRARY_PATH : "${electronLibPath}" \
               --prefix LD_LIBRARY_PATH : "${runtimeLibPath}" \
               --prefix PATH : "/run/current-system/sw/bin" \
@@ -624,6 +657,7 @@ PY
         codexDesktopNixFeatureCheck = codexDesktop.override {
           linuxFeatureIds = [
             "appshots"
+            "global-dictation"
             "mcp-helper-reaper"
             "node-repl-reaper"
             "open-target-discovery"

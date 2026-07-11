@@ -2,6 +2,7 @@
 let
   supportedFeatureIds = [
     "appshots"
+    "global-dictation"
     "mcp-helper-reaper"
     "node-repl-reaper"
     "open-target-discovery"

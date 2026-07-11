@@ -967,6 +967,7 @@ fi
         assert!(destination_root.join("launcher/webview-server.py").exists());
         assert_fresh_patch_bundle(&destination_root);
         assert!(destination_root.join("computer-use-linux").exists());
+        assert!(!destination_root.join("global-dictation-linux").exists());
         assert!(destination_root.join("read-aloud-linux").exists());
         assert!(destination_root.join("record-replay-linux").exists());
         assert!(destination_root.join("updater").exists());

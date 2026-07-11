@@ -41,8 +41,10 @@ const {
   keybindsSettingsAsset,
   linuxDesktopSettingsAsset,
   applyLinuxDesktopSettingsIndexPatch,
+  applyLinuxShortcutPhysicalKeyFallbackPatch,
   applyLinuxDesktopSettingsSectionsPatch,
   applyLinuxDesktopSettingsSharedPatch,
+  applyLinuxKeybindOverridesRuntimePatch,
   patchKeybindsSettingsAssets,
 } = require("./patches/impl/keybinds-settings.js");
 const {
@@ -1098,12 +1100,12 @@ test("default core patch descriptors are grouped and unique", () => {
   const computerUseInstallFlow = descriptors.find((descriptor) => descriptor.id === "linux-computer-use-install-flow");
   assert.equal(
     computerUseInstallFlow.pattern.test(
-      "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-current.js",
+      "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~gwqc41kz-current.js",
     ),
     true,
   );
   for (const legacyName of [
-    "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~current.js",
+    "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-current.js",
     "app-initial~app-main~remote-conversation-page~new-thread-panel-page~onboarding-page~appgen-~current.js",
     "plugins-availability-current.js",
     "use-plugin-install-flow-current.js",
@@ -4439,6 +4441,185 @@ test("adds Linux desktop settings route when upstream owns Keyboard Shortcuts", 
   assert.doesNotMatch(patched, /codexLinuxKeybindOverridesRuntime/);
 });
 
+test("adds physical-key fallback for current native shortcut runtime", () => {
+  const source = [
+    "function Ie({altKey:e,code:t,key:n}){return!e||t==null?n:Be?.[t]??Re(t)??n}",
+    "function Re(e){return/^Key[A-Z]$/.test(e)?e.slice(3).toLowerCase():/^Digit[0-9]$/.test(e)?e.slice(5):ze.get(e)??null}",
+    "var ze=new Map([[`BracketLeft`,`[`],[`Slash`,`/`]]),Be=null;",
+  ].join("");
+  const patched = applyPatchTwice(applyLinuxShortcutPhysicalKeyFallbackPatch, source);
+
+  const sandbox = {};
+  vm.runInNewContext(
+    `${patched};this.press=(event)=>Ie(event);`,
+    sandbox,
+  );
+
+  assert.equal(sandbox.press({ ctrlKey: true, code: "KeyK", key: "л", altKey: false, metaKey: false }), "k");
+  assert.equal(sandbox.press({ ctrlKey: true, code: "Digit5", key: "(", altKey: false, metaKey: false }), "5");
+  assert.equal(sandbox.press({ ctrlKey: true, code: "BracketLeft", key: "х", altKey: false, metaKey: false }), "[");
+  assert.equal(sandbox.press({ ctrlKey: false, code: "KeyK", key: "л", altKey: false, metaKey: false }), "л");
+  assert.equal(
+    sandbox.press({
+      ctrlKey: true,
+      altKey: true,
+      code: "KeyQ",
+      key: "@",
+      metaKey: false,
+      getModifierState: (name) => name === "AltGraph",
+    }),
+    "@",
+  );
+});
+
+test("patches physical-key fallback through native Keyboard Shortcuts asset scan", () => {
+  const { extractedDir, assetsDir } = createModernNativeKeyboardShortcutsSettingsFixture();
+  const shortcutRuntimeAsset = path.join(assetsDir, "app-initial~app-main~keyboard-shortcuts-runtime-A.js");
+  try {
+    fs.writeFileSync(
+      shortcutRuntimeAsset,
+      [
+        "function Ie({altKey:e,code:t,key:n}){return!e||t==null?n:Be?.[t]??Re(t)??n}",
+        "function Re(e){return/^Key[A-Z]$/.test(e)?e.slice(3).toLowerCase():/^Digit[0-9]$/.test(e)?e.slice(5):ze.get(e)??null}",
+        "var ze=new Map([[`BracketLeft`,`[`],[`Slash`,`/`]]),Be=null;",
+      ].join(""),
+      "utf8",
+    );
+
+    const { value: result, warnings } = captureWarns(() => patchKeybindsSettingsAssets(extractedDir));
+
+    assert.equal(result.matched, true);
+    assert.deepEqual(warnings, []);
+
+    const patchedSource = fs.readFileSync(shortcutRuntimeAsset, "utf8");
+    assert.match(patchedSource, /codexLinuxShortcutPhysicalKeyFallbackEvent/);
+
+    const sandbox = {};
+    vm.runInNewContext(
+      `${patchedSource};this.press=(event)=>Ie(event);`,
+      sandbox,
+    );
+    assert.equal(sandbox.press({ metaKey: true, code: "KeyB", key: "и", altKey: false, ctrlKey: false }), "b");
+    assert.equal(sandbox.press({ shiftKey: true, code: "KeyB", key: "И", altKey: false, ctrlKey: false, metaKey: false }), "И");
+
+    const secondResult = patchKeybindsSettingsAssets(extractedDir);
+    assert.equal(secondResult.matched, true);
+    assert.equal(secondResult.changed, 0);
+  } finally {
+    fs.rmSync(extractedDir, { recursive: true, force: true });
+  }
+});
+
+function runLinuxKeybindRuntimeEvent(eventInit) {
+  const dispatched = [];
+  const listeners = {};
+  const Element = class {
+    closest() {
+      return null;
+    }
+  };
+  const target = new Element();
+  const event = {
+    altKey: false,
+    code: "",
+    ctrlKey: false,
+    defaultPrevented: false,
+    key: "",
+    metaKey: false,
+    repeat: false,
+    shiftKey: false,
+    target,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    stopPropagation() {
+      this.stopped = true;
+    },
+    ...eventInit,
+  };
+  const patched = applyPatchTwice(
+    applyLinuxKeybindOverridesRuntimePatch,
+    "var Ct={openCommandMenu:`CmdOrCtrl+K`,settings:`CmdOrCtrl+,`,copySessionId:`CmdOrCtrl+Alt+C`};",
+  );
+
+  vm.runInNewContext(patched, {
+    Element,
+    navigator: { platform: "Linux x86_64" },
+    localStorage: {
+      getItem() {
+        return "{}";
+      },
+    },
+    window: {
+      addEventListener(type, listener) {
+        listeners[type] = listener;
+      },
+    },
+    E: {
+      dispatchHostMessage(message) {
+        dispatched.push(message);
+        return true;
+      },
+      dispatchMessage(type, params) {
+        dispatched.push({ type, params });
+        return true;
+      },
+    },
+  });
+
+  listeners.keydown(event);
+  return { dispatched, event };
+}
+
+test("Linux keybind runtime falls back to physical Latin key codes for defaults", () => {
+  const { dispatched, event } = runLinuxKeybindRuntimeEvent({
+    code: "KeyK",
+    ctrlKey: true,
+    key: "л",
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(dispatched)), [{ type: "command-menu", query: "" }]);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.stopped, true);
+});
+
+test("Linux keybind runtime leaves logical default shortcuts to upstream", () => {
+  const { dispatched, event } = runLinuxKeybindRuntimeEvent({
+    code: "KeyK",
+    ctrlKey: true,
+    key: "k",
+  });
+
+  assert.deepEqual(dispatched, []);
+  assert.equal(event.defaultPrevented, false);
+});
+
+test("Linux keybind runtime maps physical punctuation codes for defaults", () => {
+  const { dispatched, event } = runLinuxKeybindRuntimeEvent({
+    code: "Comma",
+    ctrlKey: true,
+    key: "б",
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(dispatched)), [
+    { type: "show-settings", params: { section: "general-settings" } },
+  ]);
+  assert.equal(event.defaultPrevented, true);
+});
+
+test("Linux keybind runtime leaves AltGraph chords to text input", () => {
+  const { dispatched, event } = runLinuxKeybindRuntimeEvent({
+    altKey: true,
+    code: "KeyC",
+    ctrlKey: true,
+    getModifierState: (name) => name === "AltGraph",
+    key: "©",
+  });
+
+  assert.deepEqual(dispatched, []);
+  assert.equal(event.defaultPrevented, false);
+});
+
 test("finds a unique current Codex request API asset outside legacy vscode-api chunks", () => {
   const extractedDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-request-api-"));
   const assetsDir = path.join(extractedDir, "webview", "assets");
@@ -5617,8 +5798,13 @@ test("discovers current app-server conversation core Linux webview patches", () 
     assert.ok(descriptor);
     assert.equal(descriptor.phase, "webview-asset");
     assert.equal(descriptor.ciPolicy, "optional");
-    assert.match(String(descriptor.pattern), /b76hmflu/);
-    assert.equal(descriptor.pattern.test(currentConversationAsset), true);
+    assert.equal(
+      descriptor.pattern.test(
+        "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~gwqc41kz-Bj9ubaFn.js",
+      ),
+      true,
+    );
+    assert.equal(descriptor.pattern.test(currentConversationAsset), false);
     assert.equal(descriptor.pattern.test(legacyConversationAsset), false);
     assert.equal(descriptor.pattern.test(legacyLatestConversationAsset), false);
     assert.equal(descriptor.pattern.test(oldConversationAsset), false);
@@ -8208,7 +8394,7 @@ test("patchExtractedApp scans current Computer Use settings bundles when UI is e
       fs.writeFileSync(
         path.join(
           assetsDir,
-          "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-current.js",
+          "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~gwqc41kz-current.js",
         ),
         "function _p(e){return e===`macOS`||e===`windows`}" +
           "function vp(e){let t=(0,Sp.c)(16),{enabled:n,hostId:r}=e,i=n===void 0?!0:n,{isLoading:a,platform:o}=ba(),s=gr(`1506311413`),c;t[0]===r?c=t[1]:(c={featureName:`computer_use`,hostId:r},t[0]=r,t[1]=c);let l=mp(c),u=o===`windows`&&!a,d=i&&u,f;t[2]===d?f=t[3]:(f={enabled:d},t[2]=d,t[3]=f);let p=yp(f),m=l.isLoading||u&&p.isLoading,h=l.enabled&&(!u||p.enabled),g;t[4]!==h||t[5]!==i||t[6]!==m||t[7]!==s||t[8]!==a||t[9]!==o?(g=xp({areRequiredFeaturesEnabled:h,enabled:i,isAnyFeatureLoading:m,isComputerUseGateEnabled:s,isHostCompatiblePlatform:_p(o),isPlatformLoading:a,windowType:`electron`}),t[4]=h,t[5]=i,t[6]=m,t[7]=s,t[8]=a,t[9]=o,t[10]=g):g=t[10];return g}",
@@ -8239,7 +8425,7 @@ test("patchExtractedApp scans current Computer Use settings bundles when UI is e
         fs.readFileSync(
           path.join(
             assetsDir,
-            "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-current.js",
+            "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~gwqc41kz-current.js",
           ),
           "utf8",
         ),

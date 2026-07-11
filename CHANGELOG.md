@@ -10,6 +10,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Nix module configurations can select the opt-in `mcp-helper-reaper`
   feature. Its Rust helper is supplied by a reproducible Nix derivation and is
   not added to the default package closure.
+- An opt-in `global-dictation` Linux feature enables the desktop app's global
+  hold and toggle dictation shortcuts on X11 and Wayland. X11 uses Electron
+  registration with a bounded modifier release watcher, while Wayland uses the
+  XDG GlobalShortcuts and RemoteDesktop portals for press, release, and paste
+  handling without direct input-device access or elevated permissions.
 
 ### Fixed
 
