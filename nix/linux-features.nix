@@ -2,6 +2,7 @@
 let
   supportedFeatureIds = [
     "appshots"
+    "mcp-helper-reaper"
     "node-repl-reaper"
     "open-target-discovery"
     "persistent-status-panel"

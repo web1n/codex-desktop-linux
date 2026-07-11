@@ -5,6 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Nix module configurations can select the opt-in `mcp-helper-reaper`
+  feature. Its Rust helper is supplied by a reproducible Nix derivation and is
+  not added to the default package closure.
+
 ### Fixed
 
 - Linux settings search no longer shows unavailable macOS Dock icon controls or

@@ -13,12 +13,14 @@ let
   testFeatureIds = [
     "persistent-status-panel"
     "appshots"
+    "mcp-helper-reaper"
     "remote-mobile-control"
     "open-target-discovery"
     "appshots"
   ];
   normalizedTestFeatureIds = [
     "appshots"
+    "mcp-helper-reaper"
     "open-target-discovery"
     "persistent-status-panel"
     "remote-mobile-control"
@@ -118,6 +120,7 @@ let
     linuxFeatureIds = [
       "remote-mobile-control"
       "persistent-status-panel"
+      "mcp-helper-reaper"
       "open-target-discovery"
       "appshots"
       "appshots"
