@@ -193,6 +193,19 @@ jobs:
             *) echo "Upstream DMG verdict: $verdict" >&2; exit 1 ;;
           esac
 
+      - name: Build Debian package artifact
+        run: |
+          set -euo pipefail
+          package_version="$(date -u '+%Y.%m.%d.%H%M%S')+ci${GITHUB_RUN_NUMBER}"
+          PACKAGE_VERSION="$package_version" ./scripts/build-deb.sh
+
+      - name: Upload Debian package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-desktop-deb
+          path: dist/codex-desktop_*.deb
+          if-no-files-found: error
+
   reconcile-upstream-dmg-issue:
     name: Reconcile Upstream DMG Drift Issue
     needs: build-app-upstream-dmg
