@@ -1444,8 +1444,9 @@ run_feature_after_exit_hooks() {
 
 run_cli_preflight() {
     local allow_install_missing="${1:-0}"
+    local require_success="${2:-0}"
     if ! has_update_manager; then
-        if [ "$allow_install_missing" = "1" ]; then
+        if [ "$allow_install_missing" = "1" ] || [ "$require_success" = "1" ]; then
             return 1
         fi
         return 0
@@ -1464,7 +1465,7 @@ run_cli_preflight() {
 
     local refreshed_path=""
     if ! refreshed_path="$(run_update_manager "${preflight_args[@]}")"; then
-        if [ "$allow_install_missing" = "1" ]; then
+        if [ "$allow_install_missing" = "1" ] || [ "$require_success" = "1" ]; then
             return 1
         fi
         notify_error "Codex CLI prelaunch check failed. Continuing with the current CLI state. Check the launcher and updater logs if ChatGPT Desktop misbehaves."
@@ -1671,7 +1672,8 @@ pid_parent_matches() {
 
 codex_cli_version_probe() {
     local output_file="$1"
-    shift
+    local stderr_file="$2"
+    shift 2
     local marker="${output_file}.timed-out"
     local probe_pid
     local watchdog_pid
@@ -1682,7 +1684,7 @@ codex_cli_version_probe() {
     rm -f "$marker"
     ( trap - EXIT
       { exec 9>&-; } 2>/dev/null || true
-      codex_exec_host_command "$@" >"$output_file" 2>/dev/null
+      codex_exec_host_command "$@" >"$output_file" 2>"$stderr_file"
     ) &
     probe_pid="$!"
     # The watchdog (and its sleep child, which outlives the kill below) must
@@ -1733,7 +1735,7 @@ codex_cli_version() {
 
     for version_arg in --version version; do
         : > "$probe_file"
-        if codex_cli_version_probe "$probe_file" "$cli_path" "$version_arg"; then
+        if codex_cli_version_probe "$probe_file" /dev/null "$cli_path" "$version_arg"; then
             output="$(sed -n '1,3p' "$probe_file" 2>/dev/null || true)"
             version="$(printf '%s\n' "$output" | sed -nE '
 s/^v?([0-9]+([.][0-9]+)+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?)([^0-9A-Za-z._+-].*)?$/\1/p
@@ -1754,6 +1756,35 @@ s/.*[^0-9A-Za-z._+-]v?([0-9]+([.][0-9]+)+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?)
     done
 
     rm -f "$probe_file" "${probe_file}.timed-out"
+    return 1
+}
+
+codex_cli_missing_optional_dependency() {
+    local cli_path="$1"
+    local output_file
+    local stderr_file
+    local probe_status
+
+    [ -n "$cli_path" ] || return 1
+    [ -x "$cli_path" ] || return 1
+    output_file="$(mktemp "${TMPDIR:-/tmp}/codex-cli-output.XXXXXX" 2>/dev/null)" || return 1
+    stderr_file="$(mktemp "${TMPDIR:-/tmp}/codex-cli-error.XXXXXX" 2>/dev/null)" || {
+        rm -f "$output_file"
+        return 1
+    }
+
+    if codex_cli_version_probe "$output_file" "$stderr_file" "$cli_path" --version; then
+        probe_status=0
+    else
+        probe_status=$?
+    fi
+    if [ "$probe_status" -ne 0 ] && [ "$probe_status" -ne 124 ] && \
+        grep -Eq 'Missing optional dependency[[:space:]]*@openai/codex-linux-(x64|arm64)([[:space:].,:;)]|$)' "$output_file" "$stderr_file"; then
+        rm -f "$output_file" "$stderr_file" "${output_file}.timed-out"
+        return 0
+    fi
+
+    rm -f "$output_file" "$stderr_file" "${output_file}.timed-out"
     return 1
 }
 
@@ -3864,9 +3895,26 @@ if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then
 fi
 
 if needs_cold_start; then
+    cli_repair_required=0
+    if codex_cli_missing_optional_dependency "$CODEX_CLI_PATH"; then
+        cli_repair_required=1
+    fi
     if [ "${CODEX_SYNC_CLI_PREFLIGHT:-0}" = "1" ]; then
-        run_cli_preflight 0
-        log_phase "cli_preflight_sync"
+        if ! run_cli_preflight 0 "$cli_repair_required"; then
+            notify_error "The selected Codex CLI is missing its Linux optional dependency and could not be repaired automatically. Reinstall it with: npm i -g --include=optional @openai/codex@latest or npm i -g --include=optional --prefix ~/.local @openai/codex@latest"
+            exit 1
+        fi
+        if [ "$cli_repair_required" = "1" ]; then
+            log_phase "cli_preflight_repair_sync"
+        else
+            log_phase "cli_preflight_sync"
+        fi
+    elif [ "$cli_repair_required" = "1" ]; then
+        if ! run_cli_preflight 0 1; then
+            notify_error "The selected Codex CLI is missing its Linux optional dependency and could not be repaired automatically. Reinstall it with: npm i -g --include=optional @openai/codex@latest or npm i -g --include=optional --prefix ~/.local @openai/codex@latest"
+            exit 1
+        fi
+        log_phase "cli_preflight_repair_sync"
     else
         run_cli_preflight_background
         log_phase "cli_preflight_backgrounded"

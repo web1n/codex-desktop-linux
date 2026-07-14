@@ -52,6 +52,8 @@ Use source files, not generated artifacts. Main routing:
 - Linux features: `linux-features/<id>/`.
 - Package builders: `scripts/build-*.sh` and `scripts/lib/package-common.sh`.
 - Updater: `updater/src/`.
+- Upstream DMG automation: `scripts/automation/upstream-dmg-watchdog/` and
+  `docs/upstream-dmg-watchdog.md`.
 - Computer Use: `computer-use-linux/`; compositor backends under
   `computer-use-linux/src/windowing/backends/`.
 - Nix: `flake.nix`, `flake.lock`, and `nix/`.
@@ -99,9 +101,10 @@ Primary human docs: [architecture](docs/architecture.md),
   set too.
 - GUI launchers often do not inherit shell `PATH`. The generated launcher
   searches common Codex CLI and `nvm` locations and respects `CODEX_CLI_PATH`.
-- CLI preflight is launcher-scoped and best-effort. It can prompt to install
-  or update the Codex CLI, but failures should warn rather than block app
-  launch.
+- CLI preflight is launcher-scoped and normally best-effort. A detected npm CLI
+  missing its required Linux optional dependency is the exception: the launcher
+  performs one bounded synchronous repair and blocks Electron startup if that
+  repair fails or times out, because the known-broken CLI cannot serve the app.
 - The generated launcher starts the local webview server before Electron and
   verifies the expected startup markers. See
   [webview server evaluation](docs/webview-server-evaluation.md) before

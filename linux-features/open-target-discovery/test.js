@@ -1399,11 +1399,15 @@ test("open-target discovery targets only the current native selector bundle", ()
   );
 
   assert.ok(descriptor);
-  assert.doesNotMatch(
-    "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~gwqc41kz-Bj9ubaFn.js",
+  assert.match(
+    "app-initial~app-main~quick-chat-window-page~work-home-page~chatgpt-conversation-page-BqLP6EDd.js",
     descriptor.pattern,
   );
-  assert.match(
+  assert.doesNotMatch(
+    "app-initial~app-main~new-thread-panel-page~onboarding-page~login-route~appgen-library-page~~gpgl9un5-_t04Xpau.js",
+    descriptor.pattern,
+  );
+  assert.doesNotMatch(
     "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-MXsOJYYa.js",
     descriptor.pattern,
   );
