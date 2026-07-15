@@ -311,12 +311,25 @@ function applyLinuxAppReloadShortcutsPatch(currentSource) {
     return currentSource;
   }
 
+  const identifierPattern = "[A-Za-z_$][\\w$]*";
+  // Providers are intentionally constrained to static member paths.  This
+  // admits both `webContents` and the current `c.webContents` shape without
+  // accepting calls, computed members, optional chaining, or expressions.
+  const staticProviderPattern =
+    `${identifierPattern}(?:\\.${identifierPattern})*`;
   const enabledPattern =
-    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)!=null&&!\2\.isDestroyed\(\)&&!!([A-Za-z_$][\w$]*)\(\2\)\?\.canReloadActiveVisiblePage\(\2,([A-Za-z_$][\w$]*)\)/g;
-  const semanticReloadHandlerPattern =
-    /([A-Za-z_$][\w$]*)=async\(([A-Za-z_$][\w$]*)=!1\)=>\{let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\);if\(!\3\)return;let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\3\);if\(\5==null\)return;let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.getFocusedWebContents\(\);if\(\2\)\{\5\.reloadActiveVisiblePageWithOptions\(\3,\{ignoreCache:!0\},\7\);return\}\5\.reloadActiveVisiblePage\(\3,\7\)\}/g;
-  const focusedWebContentsProviderPattern =
-    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.getFocusedWebContents\(\)/g;
+    new RegExp(
+      `(${identifierPattern})=(${identifierPattern})!=null&&!\\2\\.isDestroyed\\(\\)&&!!(${identifierPattern})\\(\\2\\)\\?\\.canReloadActiveVisiblePage\\(\\2,(${identifierPattern})\\)`,
+      "g",
+    );
+  const semanticReloadHandlerPattern = new RegExp(
+    `(${identifierPattern})=async\\((${identifierPattern})=!1\\)=>\\{let (${identifierPattern})=await (${identifierPattern})\\(\\);if\\(!\\3\\)return;let (${identifierPattern})=(${identifierPattern})\\(\\3\\);if\\(\\5==null\\)return;let (${identifierPattern})=(${staticProviderPattern})\\.getFocusedWebContents\\(\\);if\\(\\2\\)\\{\\5\\.reloadActiveVisiblePageWithOptions\\(\\3,\\{ignoreCache:!0\\},\\7\\);return\\}\\5\\.reloadActiveVisiblePage\\(\\3,\\7\\)\\}`,
+    "g",
+  );
+  const focusedWebContentsProviderPattern = new RegExp(
+    `(${identifierPattern})=(${staticProviderPattern})\\.getFocusedWebContents\\(\\)`,
+    "g",
+  );
   const findFocusedWebContentsProvider = (focusedWebContentsAlias, beforeIndex) => {
     let providerAlias = null;
     for (const match of currentSource
@@ -339,13 +352,13 @@ function applyLinuxAppReloadShortcutsPatch(currentSource) {
         windowAlias,
         browserSidebarManagerAlias,
         focusedWebContentsAlias,
-        focusedWebContentsProviderAlias: findFocusedWebContentsProvider(
+        focusedWebContentsProvider: findFocusedWebContentsProvider(
           focusedWebContentsAlias,
           match.index,
         ),
       };
     })
-    .filter((candidate) => candidate.focusedWebContentsProviderAlias != null);
+    .filter((candidate) => candidate.focusedWebContentsProvider != null);
   const reloadHandlers = [...currentSource.matchAll(semanticReloadHandlerPattern)].map(
     (match) => {
       const [
@@ -357,7 +370,7 @@ function applyLinuxAppReloadShortcutsPatch(currentSource) {
         _browserSidebarManagerResultAlias,
         browserSidebarManagerAlias,
         _focusedWebContentsAlias,
-        focusedWebContentsProviderAlias,
+        focusedWebContentsProvider,
       ] = match;
       return {
         handlerText: text,
@@ -368,7 +381,7 @@ function applyLinuxAppReloadShortcutsPatch(currentSource) {
         targetWindowAlias,
         getWindowAlias,
         browserSidebarManagerAlias,
-        focusedWebContentsProviderAlias,
+        focusedWebContentsProvider,
       };
     },
   );
@@ -377,8 +390,8 @@ function applyLinuxAppReloadShortcutsPatch(currentSource) {
       .filter(
         (handler) =>
           handler.browserSidebarManagerAlias === enabledCandidate.browserSidebarManagerAlias &&
-          handler.focusedWebContentsProviderAlias ===
-            enabledCandidate.focusedWebContentsProviderAlias,
+          handler.focusedWebContentsProvider ===
+            enabledCandidate.focusedWebContentsProvider,
       )
       .map((handler) => ({ ...enabledCandidate, ...handler })),
   );
