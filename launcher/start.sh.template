@@ -1497,20 +1497,31 @@ run_cli_preflight_background() {
     ) &
 }
 
-run_cli_launch_path_helper() {
-    python3 "$SCRIPT_DIR/.codex-linux/cli-launch-path.py" "$1"
-}
+resolve_cli_launch_path() {
+    local selected_path="${CODEX_CLI_PATH:-}"
+    local resolved_path=""
 
-verify_cli_launch_path() {
-    local verified_path=""
-    if ! verified_path="$(run_cli_launch_path_helper "$CODEX_CLI_PATH")"; then
-        return 1
-    fi
-    if [ -z "$verified_path" ]; then
+    if [ -z "$selected_path" ]; then
         return 1
     fi
 
-    CODEX_CLI_PATH="$verified_path"
+    case "$selected_path" in
+        */*) ;;
+        *)
+            selected_path="$(type -P "$selected_path" 2>/dev/null || true)"
+            [ -n "$selected_path" ] || return 1
+            ;;
+    esac
+
+    if command -v readlink >/dev/null 2>&1; then
+        resolved_path="$(readlink -f -- "$selected_path" 2>/dev/null || true)"
+    elif command -v realpath >/dev/null 2>&1; then
+        resolved_path="$(realpath -- "$selected_path" 2>/dev/null || true)"
+    fi
+    [ -n "$resolved_path" ] || return 1
+    [ -f "$resolved_path" ] && [ -x "$resolved_path" ] || return 1
+
+    CODEX_CLI_PATH="$resolved_path"
     export CODEX_CLI_PATH
 }
 
@@ -1634,6 +1645,14 @@ find_codex_cli() {
         return 0
     fi
 
+    if [ -n "${HOMEBREW_PREFIX:-}" ]; then
+        local homebrew_candidate="$HOMEBREW_PREFIX/bin/codex"
+        if [ -x "$homebrew_candidate" ]; then
+            echo "$homebrew_candidate"
+            return 0
+        fi
+    fi
+
     local nvm_dir="${NVM_DIR:-}"
     if [ -z "$nvm_dir" ]; then
         if [ -s "${XDG_CONFIG_HOME:-$HOME/.config}/nvm/nvm.sh" ]; then
@@ -1664,6 +1683,8 @@ find_codex_cli() {
         "$HOME/.nvm/versions/node"/*/bin/codex \
         "$(find_fnm_codex_cli || true)" \
         "$HOME/.local/share/pnpm/codex" \
+        "$HOME/.linuxbrew/bin/codex" \
+        "/home/linuxbrew/.linuxbrew/bin/codex" \
         "$HOME/.local/bin/codex" \
         "/usr/local/bin/codex" \
         "/usr/bin/codex"
@@ -4214,11 +4235,11 @@ if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then
 fi
 
 if [ -n "$CODEX_CLI_PATH" ]; then
-    if ! verify_cli_launch_path; then
-        notify_error "The selected Codex CLI failed its execution-free trust check and will not be executed. If it is a rejected managed standalone install, stop active Codex installers and remove its standalone tree. Updater-enabled native packages can then run: codex-update-manager recover-standalone-cli --print-path. With AppImage, Nix, or updaterless packages, reinstall from a verified package channel into a fresh path owned by you or root with no group/world-writable file or parent directory; do not reuse the rejected tree. To switch away from standalone intentionally, also remove ~/.codex-standalone-provenance."
+    if ! resolve_cli_launch_path; then
+        notify_error "The selected Codex CLI path could not be resolved to an executable file. Reinstall Codex CLI or set CODEX_CLI_PATH to an executable codex binary."
         exit 1
     fi
-    log_phase "cli_launch_path_verified"
+    log_phase "cli_launch_path_resolved"
 fi
 
 if needs_cold_start; then

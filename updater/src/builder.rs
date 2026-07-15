@@ -16,7 +16,7 @@ use tracing::info;
 
 const UPDATE_BUILDER_MANIFEST: &str = ".codex-linux/update-builder-manifest.txt";
 
-const REQUIRED_BUNDLE_FILES: [(&str, &str); 22] = [
+const REQUIRED_BUNDLE_FILES: [(&str, &str); 21] = [
     ("Cargo.toml", "Cargo.toml"),
     ("Cargo.lock", "Cargo.lock"),
     ("computer-use-linux", "computer-use-linux"),
@@ -33,7 +33,6 @@ const REQUIRED_BUNDLE_FILES: [(&str, &str); 22] = [
         "plugins/openai-bundled/plugins/read-aloud",
     ),
     ("install.sh", "install.sh"),
-    ("launcher/cli-launch-path.py", "launcher/cli-launch-path.py"),
     ("launcher/start.sh.template", "launcher/start.sh.template"),
     ("launcher/webview-server.py", "launcher/webview-server.py"),
     ("scripts/build-deb.sh", "scripts/build-deb.sh"),
@@ -747,10 +746,6 @@ touch "${DIST_DIR_OVERRIDE}/codex-desktop-${VER}-1-x86_64.pkg.tar.zst"
             b"{\"commit\":\"0123456789012345678901234567890123456789\",\"version\":\"0.8.1\"}\n",
         )?;
         fs::write(
-            bundle_root.join("launcher/cli-launch-path.py"),
-            b"# fake CLI launch path helper\n",
-        )?;
-        fs::write(
             bundle_root.join("launcher/start.sh.template"),
             b"# fake launcher template\n",
         )?;
@@ -965,10 +960,6 @@ fi
         write_fake_patch_bundle(&source_root)?;
         fs::write(source_root.join("install.sh"), b"#!/bin/bash\n")?;
         fs::write(
-            source_root.join("launcher/cli-launch-path.py"),
-            b"# fake CLI launch path helper\n",
-        )?;
-        fs::write(
             source_root.join("launcher/start.sh.template"),
             b"# fake launcher template\n",
         )?;
@@ -1020,9 +1011,6 @@ fi
         assert!(destination_root.join("read-aloud-linux").exists());
         assert!(destination_root.join("record-replay-linux").exists());
         assert!(destination_root.join("updater").exists());
-        assert!(destination_root
-            .join("launcher/cli-launch-path.py")
-            .exists());
         assert!(destination_root.join("assets/codex-linux.png").exists());
         assert!(destination_root
             .join("plugins/openai-bundled/plugins/computer-use/.mcp.json")
