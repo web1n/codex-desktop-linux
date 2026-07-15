@@ -312,26 +312,117 @@ function applyLinuxAppReloadShortcutsPatch(currentSource) {
   }
 
   const enabledPattern =
-    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)!=null&&!\2\.isDestroyed\(\)&&!!([A-Za-z_$][\w$]*)\(\2\)\?\.canReloadActiveVisiblePage\(\2,([A-Za-z_$][\w$]*)\)/;
-  const reloadHandlerPattern =
-    /([A-Za-z_$][\w$]*)=async\(([A-Za-z_$][\w$]*)=!1\)=>\{let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\);if\(!\3\)return;/;
-  const enabledMatch = currentSource.match(enabledPattern);
-  const handlerMatch = currentSource.match(reloadHandlerPattern);
-  if (enabledMatch == null || handlerMatch == null) {
+    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)!=null&&!\2\.isDestroyed\(\)&&!!([A-Za-z_$][\w$]*)\(\2\)\?\.canReloadActiveVisiblePage\(\2,([A-Za-z_$][\w$]*)\)/g;
+  const semanticReloadHandlerPattern =
+    /([A-Za-z_$][\w$]*)=async\(([A-Za-z_$][\w$]*)=!1\)=>\{let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\);if\(!\3\)return;let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\3\);if\(\5==null\)return;let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.getFocusedWebContents\(\);if\(\2\)\{\5\.reloadActiveVisiblePageWithOptions\(\3,\{ignoreCache:!0\},\7\);return\}\5\.reloadActiveVisiblePage\(\3,\7\)\}/g;
+  const focusedWebContentsProviderPattern =
+    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.getFocusedWebContents\(\)/g;
+  const findFocusedWebContentsProvider = (focusedWebContentsAlias, beforeIndex) => {
+    let providerAlias = null;
+    for (const match of currentSource
+      .slice(0, beforeIndex)
+      .matchAll(focusedWebContentsProviderPattern)) {
+      if (match[1] === focusedWebContentsAlias) {
+        providerAlias = match[2];
+      }
+    }
+    return providerAlias;
+  };
+  const enabledCandidates = [...currentSource.matchAll(enabledPattern)]
+    .map((match) => {
+      const [text, enabledAlias, windowAlias, browserSidebarManagerAlias, focusedWebContentsAlias] = match;
+      return {
+        enabledText: text,
+        enabledStart: match.index,
+        enabledEnd: match.index + text.length,
+        enabledAlias,
+        windowAlias,
+        browserSidebarManagerAlias,
+        focusedWebContentsAlias,
+        focusedWebContentsProviderAlias: findFocusedWebContentsProvider(
+          focusedWebContentsAlias,
+          match.index,
+        ),
+      };
+    })
+    .filter((candidate) => candidate.focusedWebContentsProviderAlias != null);
+  const reloadHandlers = [...currentSource.matchAll(semanticReloadHandlerPattern)].map(
+    (match) => {
+      const [
+        text,
+        reloadHandlerAlias,
+        ignoreCacheAlias,
+        targetWindowAlias,
+        getWindowAlias,
+        _browserSidebarManagerResultAlias,
+        browserSidebarManagerAlias,
+        _focusedWebContentsAlias,
+        focusedWebContentsProviderAlias,
+      ] = match;
+      return {
+        handlerText: text,
+        handlerStart: match.index,
+        handlerEnd: match.index + text.length,
+        reloadHandlerAlias,
+        ignoreCacheAlias,
+        targetWindowAlias,
+        getWindowAlias,
+        browserSidebarManagerAlias,
+        focusedWebContentsProviderAlias,
+      };
+    },
+  );
+  const reloadCandidates = enabledCandidates.flatMap((enabledCandidate) =>
+    reloadHandlers
+      .filter(
+        (handler) =>
+          handler.browserSidebarManagerAlias === enabledCandidate.browserSidebarManagerAlias &&
+          handler.focusedWebContentsProviderAlias ===
+            enabledCandidate.focusedWebContentsProviderAlias,
+      )
+      .map((handler) => ({ ...enabledCandidate, ...handler })),
+  );
+
+  if (reloadCandidates.length !== 1) {
     console.warn("WARN: Could not find native browser reload menu actions — skipping Linux app reload shortcut patch");
     return currentSource;
   }
 
-  const [, enabledAlias, windowAlias, browserSidebarManagerAlias, focusedWebContentsAlias] = enabledMatch;
-  const [, reloadHandlerAlias, ignoreCacheAlias, targetWindowAlias, getWindowAlias] = handlerMatch;
+  const {
+    enabledText,
+    enabledStart,
+    enabledEnd,
+    handlerText,
+    handlerStart,
+    handlerEnd,
+    enabledAlias,
+    windowAlias,
+    browserSidebarManagerAlias,
+    focusedWebContentsAlias,
+    reloadHandlerAlias,
+    ignoreCacheAlias,
+    targetWindowAlias,
+    getWindowAlias,
+  } = reloadCandidates[0];
   const enabledReplacement =
     `${enabledAlias}=process.platform===\`linux\`||${windowAlias}!=null&&!${windowAlias}.isDestroyed()&&!!${browserSidebarManagerAlias}(${windowAlias})?.canReloadActiveVisiblePage(${windowAlias},${focusedWebContentsAlias})`;
-  const handlerReplacement =
-    `${reloadHandlerAlias}=async(${ignoreCacheAlias}=!1)=>{let ${targetWindowAlias}=await ${getWindowAlias}();if(!${targetWindowAlias})return;if(process.platform===\`linux\`){let ${patchMarker}=${targetWindowAlias}.webContents;if(${ignoreCacheAlias}){${patchMarker}.reloadIgnoringCache();return}${targetWindowAlias}.reload();return}`;
+  const handlerPrefix =
+    `${reloadHandlerAlias}=async(${ignoreCacheAlias}=!1)=>{let ${targetWindowAlias}=await ${getWindowAlias}();if(!${targetWindowAlias})return;`;
+  const handlerReplacement = handlerText.replace(
+    handlerPrefix,
+    `${handlerPrefix}if(process.platform===\`linux\`){let ${patchMarker}=${targetWindowAlias}.webContents;if(${ignoreCacheAlias}){${patchMarker}.reloadIgnoringCache();return}${targetWindowAlias}.reload();return}`,
+  );
 
-  return currentSource
-    .replace(enabledPattern, enabledReplacement)
-    .replace(reloadHandlerPattern, handlerReplacement);
+  return [
+    { start: enabledStart, end: enabledEnd, replacement: enabledReplacement },
+    { start: handlerStart, end: handlerEnd, replacement: handlerReplacement },
+  ]
+    .sort((left, right) => right.start - left.start)
+    .reduce(
+      (source, { start, end, replacement }) =>
+        source.slice(0, start) + replacement + source.slice(end),
+      currentSource,
+    );
 }
 
 function applyLinuxSetIconPatch(currentSource, iconAsset) {

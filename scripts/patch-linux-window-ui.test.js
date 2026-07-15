@@ -2796,8 +2796,18 @@ test("migrates a Linux-suppressed application menu back to the real menu", () =>
   assert.equal(patched, "let et=n.Menu.buildFromTemplate($e);n.Menu.setApplicationMenu(et);");
 });
 
-test("routes persisted native reload shortcuts to the Linux app webview", async () => {
-  const source = "let focusedWindow=BrowserWindow.getFocusedWindow(),focusedWebContents=webContents.getFocusedWebContents(),reloadEnabled=focusedWindow!=null&&!focusedWindow.isDestroyed()&&!!getBrowserSidebarManager(focusedWindow)?.canReloadActiveVisiblePage(focusedWindow,focusedWebContents),runReload=async(force=!1)=>{let target=await getWindow();if(!target)return;let manager=getBrowserSidebarManager(target);if(manager==null)return;let focused=webContents.getFocusedWebContents();if(force){manager.reloadActiveVisiblePageWithOptions(target,{ignoreCache:!0},focused);return}manager.reloadActiveVisiblePage(target,focused)},reload={enabled:reloadEnabled};this.runReload=runReload;";
+function nativeReloadHandlerSource(handlerAlias = "runReload", focusedWebContentsProvider = "webContents") {
+  return `${handlerAlias}=async(force=!1)=>{let target=await getWindow();if(!target)return;let manager=getBrowserSidebarManager(target);if(manager==null)return;let focused=${focusedWebContentsProvider}.getFocusedWebContents();if(force){manager.reloadActiveVisiblePageWithOptions(target,{ignoreCache:!0},focused);return}manager.reloadActiveVisiblePage(target,focused)}`;
+}
+
+function nativeReloadMenuSource(handlerAlias = "runReload") {
+  return `let focusedWindow=BrowserWindow.getFocusedWindow(),focusedWebContents=webContents.getFocusedWebContents(),reloadEnabled=focusedWindow!=null&&!focusedWindow.isDestroyed()&&!!getBrowserSidebarManager(focusedWindow)?.canReloadActiveVisiblePage(focusedWindow,focusedWebContents),${nativeReloadHandlerSource(handlerAlias)}`;
+}
+
+test("routes persisted native reload shortcuts to the Linux app webview without changing their mapping", async () => {
+  const decoy = "decoyReload=async(force=!1)=>{let target=await getWindow();if(!target)return;doSomething(target)}";
+  const persistedMenu = "persistedMenu={commandId:`reload`,mapping:settings.get(`nativeReloadShortcut`)}";
+  const source = `${decoy};${nativeReloadMenuSource()};${persistedMenu};this.runReload=runReload;`;
   const patched = applyPatchTwice(applyLinuxAppReloadShortcutsPatch, source);
   const reloads = [];
   const context = {
@@ -2808,6 +2818,7 @@ test("routes persisted native reload shortcuts to the Linux app webview", async 
       webContents: { reloadIgnoringCache() { reloads.push("hard-reload"); } },
     }),
     process: { platform: "linux" },
+    settings: { get() { return "persisted-shortcut"; } },
     webContents: { getFocusedWebContents() { return null; } },
   };
   vm.runInNewContext(patched, context);
@@ -2817,6 +2828,129 @@ test("routes persisted native reload shortcuts to the Linux app webview", async 
 
   assert.deepEqual(reloads, ["reload", "hard-reload"]);
   assert.match(patched, /reloadEnabled=process\.platform===`linux`\|\|focusedWindow!=null/);
+  assert.match(patched, new RegExp(escapeRegExp(decoy)));
+  assert.match(patched, new RegExp(escapeRegExp(persistedMenu)));
+  assert.doesNotMatch(patched, /(?:Ctrl|Cmd|Alt)\+/);
+});
+
+test("keeps Browser Sidebar reload behavior outside Linux", async () => {
+  const source = `${nativeReloadMenuSource()};this.runReload=runReload;`;
+  const patched = applyPatchTwice(applyLinuxAppReloadShortcutsPatch, source);
+  const reloads = [];
+  const context = {
+    BrowserWindow: { getFocusedWindow() { return null; } },
+    getBrowserSidebarManager() {
+      return {
+        reloadActiveVisiblePageWithOptions(_window, options, focused) {
+          reloads.push(["hard-reload", options, focused]);
+        },
+        reloadActiveVisiblePage(_window, focused) { reloads.push(["reload", focused]); },
+      };
+    },
+    getWindow: async () => ({ reload() { throw new Error("non-Linux must use Browser Sidebar"); } }),
+    process: { platform: "darwin" },
+    webContents: { getFocusedWebContents() { return "focused-webcontents"; } },
+  };
+  vm.runInNewContext(patched, context);
+
+  await context.runReload(false);
+  await context.runReload(true);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(reloads)), [
+    ["reload", "focused-webcontents"],
+    ["hard-reload", { ignoreCache: true }, "focused-webcontents"],
+  ]);
+});
+
+test("fails soft when multiple semantic native reload handlers are present", () => {
+  const source = `${nativeReloadMenuSource()},${nativeReloadMenuSource("secondReload")};`;
+  const { value: patched, warnings } = captureWarns(() =>
+    applyLinuxAppReloadShortcutsPatch(source),
+  );
+
+  assert.equal(patched, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find native browser reload menu actions — skipping Linux app reload shortcut patch",
+  ]);
+});
+
+test("fails soft when no semantic native reload handler is present", () => {
+  const source = "let focusedWindow=BrowserWindow.getFocusedWindow(),focusedWebContents=webContents.getFocusedWebContents(),reloadEnabled=focusedWindow!=null&&!focusedWindow.isDestroyed()&&!!getBrowserSidebarManager(focusedWindow)?.canReloadActiveVisiblePage(focusedWindow,focusedWebContents),runReload=async(force=!1)=>{let target=await getWindow();if(!target)return;doSomething(target)};";
+  const { value: patched, warnings } = captureWarns(() =>
+    applyLinuxAppReloadShortcutsPatch(source),
+  );
+
+  assert.equal(patched, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find native browser reload menu actions — skipping Linux app reload shortcut patch",
+  ]);
+});
+
+test("fails soft when the semantic reload handler uses the wrong focused-webContents provider", () => {
+  const source = nativeReloadMenuSource().replace(
+    nativeReloadHandlerSource(),
+    nativeReloadHandlerSource("runReload", "otherWebContents"),
+  );
+  const { value: patched, warnings } = captureWarns(() =>
+    applyLinuxAppReloadShortcutsPatch(source),
+  );
+
+  assert.equal(patched, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find native browser reload menu actions — skipping Linux app reload shortcut patch",
+  ]);
+});
+
+test("patches the correlated reload handler but leaves a wrong-provider semantic decoy untouched", () => {
+  const wrongProviderDecoy = nativeReloadHandlerSource("wrongProviderReload", "otherWebContents");
+  const source = `${nativeReloadMenuSource()},${wrongProviderDecoy};`;
+  const patched = applyPatchTwice(applyLinuxAppReloadShortcutsPatch, source);
+
+  assert.match(patched, /runReload=async\(force=!1\)=>\{let target=await getWindow\(\);if\(!target\)return;if\(process\.platform===`linux`\)/);
+  assert.match(patched, new RegExp(escapeRegExp(wrongProviderDecoy)));
+});
+
+test("patches a valid reload pair despite an orphan enablement anchor", () => {
+  const orphanAnchor = "orphanFocused=orphanWebContents.getFocusedWebContents(),orphanEnabled=focusedWindow!=null&&!focusedWindow.isDestroyed()&&!!getBrowserSidebarManager(focusedWindow)?.canReloadActiveVisiblePage(focusedWindow,orphanFocused)";
+  const source = `${nativeReloadMenuSource()},${orphanAnchor};`;
+  const patched = applyPatchTwice(applyLinuxAppReloadShortcutsPatch, source);
+
+  assert.match(patched, /reloadEnabled=process\.platform===`linux`\|\|focusedWindow!=null/);
+  assert.match(patched, new RegExp(escapeRegExp(orphanAnchor)));
+});
+
+test("patches the selected enablement anchor by range when an identical orphan appears first", () => {
+  const enablementAnchor = "reloadEnabled=focusedWindow!=null&&!focusedWindow.isDestroyed()&&!!getBrowserSidebarManager(focusedWindow)?.canReloadActiveVisiblePage(focusedWindow,focusedWebContents)";
+  const validProviderAssignment = "focusedWebContents=webContents.getFocusedWebContents()";
+  const source = `let focusedWindow=BrowserWindow.getFocusedWindow(),focusedWebContents=orphanWebContents.getFocusedWebContents(),${enablementAnchor},${validProviderAssignment},${enablementAnchor},${nativeReloadHandlerSource()};`;
+  const patched = applyPatchTwice(applyLinuxAppReloadShortcutsPatch, source);
+  const validProviderIndex = source.indexOf(validProviderAssignment);
+
+  assert.equal(
+    patched.slice(0, patched.indexOf(validProviderAssignment)),
+    source.slice(0, validProviderIndex),
+  );
+  assert.match(
+    patched.slice(patched.indexOf(validProviderAssignment)),
+    /reloadEnabled=process\.platform===`linux`\|\|focusedWindow!=null/,
+  );
+});
+
+test("fails soft when multiple fully correlated native reload pairs are present", () => {
+  const secondPair = nativeReloadMenuSource("secondReload")
+    .replaceAll("focusedWindow", "secondFocusedWindow")
+    .replaceAll("focusedWebContents", "secondFocusedWebContents")
+    .replaceAll("webContents", "secondWebContents")
+    .replaceAll("getBrowserSidebarManager", "secondGetBrowserSidebarManager");
+  const source = `${nativeReloadMenuSource()};${secondPair};`;
+  const { value: patched, warnings } = captureWarns(() =>
+    applyLinuxAppReloadShortcutsPatch(source),
+  );
+
+  assert.equal(patched, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find native browser reload menu actions — skipping Linux app reload shortcut patch",
+  ]);
 });
 
 test("patches current opaque window surface background helper shape for Linux", () => {
