@@ -19,6 +19,7 @@ jobs:
   rust-and-smoke:
     name: Rust and Smoke Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -38,6 +39,7 @@ jobs:
           bash -n scripts/ci/validate-nix-pins.sh
 
       - name: Check Node syntax and tests
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           bash scripts/ci/run-node-checks.sh

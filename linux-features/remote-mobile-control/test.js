@@ -3,6 +3,7 @@
 
 const assert = require("node:assert/strict");
 const { spawn, spawnSync } = require("node:child_process");
+const { EventEmitter, once } = require("node:events");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -2906,9 +2907,46 @@ test("Linux device-key store serializes concurrent updates", async () => {
   }
 });
 
-test("Linux device-key store contends on its validated lock file", async () => {
+test("Linux device-key operations wait for lock process stdio to close", async () => {
+  const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-key-close-"));
+  try {
+    const child = new EventEmitter();
+    child.stdin = { end() {} };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => true;
+
+    const client = createPatchedDeviceKeyClient(configHome, {
+      "node:child_process": {
+        spawn() {
+          return child;
+        },
+      },
+    });
+    let settled = false;
+    const creation = client.createDeviceKey("allow_os_protected_nonextractable").then((value) => {
+      settled = true;
+      return value;
+    });
+
+    child.stdout.emit("data", Buffer.from("ready\n"));
+    await new Promise((resolve) => setImmediate(resolve));
+    child.emit("exit", 0, null);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(settled, false, "the lock operation must not resolve before child stdio closes");
+
+    child.emit("close", 0, null);
+    await creation;
+  } finally {
+    fs.rmSync(configHome, { recursive: true, force: true });
+  }
+});
+
+test("Linux device-key store contends on its validated lock file", { timeout: 10_000 }, async () => {
   const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-key-lock-"));
   let holder;
+  let holderClosed;
   try {
     const client = createPatchedDeviceKeyClient(configHome);
     await client.createDeviceKey("test");
@@ -2916,6 +2954,7 @@ test("Linux device-key store contends on its validated lock file", async () => {
     holder = spawn("flock", ["-x", lock, "sh", "-c", "printf 'ready\\n'; sleep 0.25"], {
       stdio: ["ignore", "pipe", "pipe"],
     });
+    holderClosed = once(holder, "close");
     await new Promise((resolve, reject) => {
       let output = "";
       holder.once("error", reject);
@@ -2927,9 +2966,14 @@ test("Linux device-key store contends on its validated lock file", async () => {
 
     const startedAt = Date.now();
     await client.createDeviceKey("test");
+    const [holderExitCode] = await holderClosed;
     assert.ok(Date.now() - startedAt >= 150, "key update must wait for the existing file lock");
+    assert.equal(holderExitCode, 0);
   } finally {
-    holder?.kill();
+    if (holder?.exitCode == null && holder?.signalCode == null) {
+      holder.kill("SIGKILL");
+    }
+    await holderClosed?.catch(() => {});
     fs.rmSync(configHome, { recursive: true, force: true });
   }
 });
