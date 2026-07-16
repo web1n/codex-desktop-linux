@@ -53,7 +53,9 @@ const REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER = "codexLinuxRemoteMobileAp
 const REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE =
   "[`-c`,`features.code_mode_host=true`,`app-server`,`--analytics-default-enabled`]";
 const REMOTE_MOBILE_RUNTIME_ASSET_PATTERN =
-  /^app-initial~app-main~hotkey-window-new-thread-page~hotkey-window-home-page~composer-utility-bar-[^.]+\.js$/u;
+  /^app-initial~app-main~pull-request-route~new-thread-panel-page~onboarding-page~settings-page~i2dgsl27-[^.]+\.js$/u;
+const REMOTE_MOBILE_TERMINAL_STATUS_ASSET_PATTERN =
+  /^app-initial~artifact-tab-content\.electron~app-main~pull-request-route~pull-request-code-rev~[^.]+\.js$/u;
 const REMOTE_CONTROL_APP_MAIN_PAGE_ASSET_PATTERN =
   /^app-initial~app-main~page-[^.]+\.js$/u;
 const REMOTE_MOBILE_ACTIVE_STATUS_ASSET_PATTERN =
@@ -1513,7 +1515,7 @@ module.exports = [
   {
     id: "linux-remote-terminal-status-recovery",
     phase: "webview-asset",
-    pattern: REMOTE_MOBILE_RUNTIME_ASSET_PATTERN,
+    pattern: REMOTE_MOBILE_TERMINAL_STATUS_ASSET_PATTERN,
     order: 20_152,
     ciPolicy: "optional",
     missingDescription: "app-server conversation manager bundle",
