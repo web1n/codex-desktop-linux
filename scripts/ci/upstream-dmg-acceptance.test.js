@@ -169,6 +169,9 @@ test("upstream workflow concurrency is isolated per PR or ref", () => {
   assert.doesNotMatch(workflow, /group: upstream-dmg-acceptance-\$\{\{ github\.event_name \}\}\s*$/m);
   assert.equal((workflow.match(/- linux-features\/\*\*/g) ?? []).length, 2);
   assert.equal((workflow.match(/- scripts\/lib\/linux-features\.js/g) ?? []).length, 2);
+  assert.doesNotMatch(workflow, /uses:\s+[^\s]+@v\d/);
+  assert.match(workflow, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
+  assert.match(workflow, /persist-credentials: false/);
 });
 
 test("Nix refresh serializes campaigns and deduplicates refresh and exact-head CI", () => {
@@ -199,9 +202,37 @@ test("Nix hash refresh accepts a validated focused output override", () => {
     path.resolve(__dirname, "update-nix-hashes.sh"),
     "utf8",
   );
+  const workflow = fs.readFileSync(
+    path.resolve(__dirname, "../../.github/workflows/ci.yml"),
+    "utf8",
+  );
+  const refreshWorkflow = fs.readFileSync(
+    path.resolve(__dirname, "../../.github/workflows/update-codex-hash.yml"),
+    "utf8",
+  );
+  const watchdogProfile = JSON.parse(fs.readFileSync(
+    path.resolve(__dirname, "watchdog-linux-features.json"),
+    "utf8",
+  ));
 
+  assert.deepEqual(watchdogProfile.enabled, [
+    "appshots",
+    "codex-wrapper-updater",
+    "frameless-titlebar",
+    "global-dictation",
+    "mcp-helper-reaper",
+    "node-repl-reaper",
+    "open-target-discovery",
+    "persistent-status-panel",
+    "remote-control-ui",
+    "remote-mobile-control",
+    "ui-tweaks",
+  ]);
   assert.match(script, /NIX_VERIFY_OUTPUTS/);
   assert.match(script, /NIX_COMPARE_REF/);
+  assert.match(workflow, /\.#checks\.x86_64-linux\.watchdog-linux-features/);
+  assert.match(refreshWorkflow, /NIX_VERIFY_OUTPUTS/);
+  assert.match(refreshWorkflow, /\.#checks\.x86_64-linux\.watchdog-linux-features/);
   assert.match(script, /Invalid Nix verification output/);
   assert.match(script, /run_nix_build "\$VERIFY_LOG" "\$\{PACKAGE_OUTPUTS\[@\]\}"/);
 });

@@ -16,10 +16,11 @@ use tracing::info;
 
 const UPDATE_BUILDER_MANIFEST: &str = ".codex-linux/update-builder-manifest.txt";
 
-const REQUIRED_BUNDLE_FILES: [(&str, &str); 20] = [
+const REQUIRED_BUNDLE_FILES: [(&str, &str); 22] = [
     ("Cargo.toml", "Cargo.toml"),
     ("Cargo.lock", "Cargo.lock"),
     ("computer-use-linux", "computer-use-linux"),
+    ("notification-actions-linux", "notification-actions-linux"),
     ("read-aloud-linux", "read-aloud-linux"),
     ("record-replay-linux", "record-replay-linux"),
     ("updater", "updater"),
@@ -33,6 +34,7 @@ const REQUIRED_BUNDLE_FILES: [(&str, &str); 20] = [
     ),
     ("install.sh", "install.sh"),
     ("launcher/start.sh.template", "launcher/start.sh.template"),
+    ("launcher/cli-launch-path.py", "launcher/cli-launch-path.py"),
     ("launcher/webview-server.py", "launcher/webview-server.py"),
     ("scripts/build-deb.sh", "scripts/build-deb.sh"),
     (
@@ -616,7 +618,7 @@ touch "${DIST_DIR_OVERRIDE}/codex-desktop-${VER}-1-x86_64.pkg.tar.zst"
     fn write_fake_computer_use_bundle(root: &Path) -> Result<()> {
         fs::write(
             root.join("Cargo.toml"),
-            b"[workspace]\nmembers = [\"computer-use-linux\", \"read-aloud-linux\", \"record-replay-linux\", \"updater\"]\n",
+            b"[workspace]\nmembers = [\"computer-use-linux\", \"notification-actions-linux\", \"read-aloud-linux\", \"record-replay-linux\", \"updater\"]\n",
         )?;
         fs::write(root.join("Cargo.lock"), b"# fake lock\n")?;
         fs::create_dir_all(root.join("computer-use-linux/src"))?;
@@ -626,6 +628,15 @@ touch "${DIST_DIR_OVERRIDE}/codex-desktop-${VER}-1-x86_64.pkg.tar.zst"
         )?;
         fs::write(
             root.join("computer-use-linux/src/main.rs"),
+            b"fn main() {}\n",
+        )?;
+        fs::create_dir_all(root.join("notification-actions-linux/src"))?;
+        fs::write(
+            root.join("notification-actions-linux/Cargo.toml"),
+            b"[package]\nname = \"codex-notification-actions-linux\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )?;
+        fs::write(
+            root.join("notification-actions-linux/src/main.rs"),
             b"fn main() {}\n",
         )?;
         fs::create_dir_all(root.join("read-aloud-linux/src"))?;
@@ -738,6 +749,10 @@ touch "${DIST_DIR_OVERRIDE}/codex-desktop-${VER}-1-x86_64.pkg.tar.zst"
         fs::write(
             bundle_root.join("launcher/start.sh.template"),
             b"# fake launcher template\n",
+        )?;
+        fs::write(
+            bundle_root.join("launcher/cli-launch-path.py"),
+            b"# fake CLI launch path helper\n",
         )?;
         fs::write(
             bundle_root.join("launcher/webview-server.py"),
@@ -908,6 +923,10 @@ fi
             .exists());
         assert!(artifacts
             .workspace_dir
+            .join("builder/launcher/cli-launch-path.py")
+            .exists());
+        assert!(artifacts
+            .workspace_dir
             .join("builder/launcher/webview-server.py")
             .exists());
         assert!(artifacts
@@ -954,6 +973,10 @@ fi
             b"# fake launcher template\n",
         )?;
         fs::write(
+            source_root.join("launcher/cli-launch-path.py"),
+            b"# fake CLI launch path helper\n",
+        )?;
+        fs::write(
             source_root.join("launcher/webview-server.py"),
             b"# fake webview server\n",
         )?;
@@ -991,9 +1014,15 @@ fi
         assert!(destination_root
             .join("scripts/patch-linux-window-ui.js")
             .exists());
+        assert!(destination_root
+            .join("launcher/cli-launch-path.py")
+            .exists());
         assert!(destination_root.join("launcher/webview-server.py").exists());
         assert_fresh_patch_bundle(&destination_root);
         assert!(destination_root.join("computer-use-linux").exists());
+        assert!(destination_root
+            .join("notification-actions-linux/Cargo.toml")
+            .exists());
         assert!(!destination_root.join("global-dictation-linux").exists());
         assert!(destination_root.join("read-aloud-linux").exists());
         assert!(destination_root.join("record-replay-linux").exists());
